@@ -102,9 +102,7 @@ export async function getPmacAssignmentsBoard() {
           },
           attendanceRecords: {
             where: {
-              recordedAt: {
-                gte: attendanceWindow,
-              },
+              event: { startDateTime: { gte: attendanceWindow } },
             },
             select: {
               status: true,
@@ -122,7 +120,7 @@ export async function getPmacAssignmentsBoard() {
         ? Math.round(
             (member.attendanceRecords.filter((record) => record.status === 'PRESENT' || record.status === 'LATE').length / attendanceCount) * 100
           )
-        : 100
+        : null
 
       return [member.id, {
         upcomingLoad,
@@ -136,7 +134,7 @@ export async function getPmacAssignmentsBoard() {
     ...assignment,
     memberInsights: insightMap.get(assignment.memberId) ?? {
       upcomingLoad: 0,
-      attendanceRate: 100,
+      attendanceRate: null,
       workloadTier: 'Light',
     },
   }))
@@ -259,7 +257,7 @@ export async function savePmacAssignments(eventId: string, assignments: PmacAssi
       return { success: false, error: 'PMAC event not found.' }
     }
 
-    if (event.status !== 'APPROVED' && event.status !== 'COMPLETED') {
+    if (event.status !== 'APPROVED') {
       return { success: false, error: 'Assignments can only be managed for approved or completed PMAC events.' }
     }
     if (event.sourceType === 'CMAC_REQUEST' && !event.handoffAcknowledgedAt) {
@@ -359,6 +357,7 @@ export async function savePmacAssignments(eventId: string, assignments: PmacAssi
     const overlappingAssignments = memberIds.length
       ? await prisma.pmacEventAssignment.findMany({
           where: {
+            availabilityResponse: { not: 'NO' },
             memberId: {
               in: memberIds,
             },
@@ -427,6 +426,7 @@ export async function savePmacAssignments(eventId: string, assignments: PmacAssi
     const surroundingAssignments = memberIds.length
       ? await prisma.pmacEventAssignment.findMany({
           where: {
+            availabilityResponse: { not: 'NO' },
             memberId: {
               in: memberIds,
             },
@@ -466,6 +466,12 @@ export async function savePmacAssignments(eventId: string, assignments: PmacAssi
       const deletions = existingAssignments
         .filter(assignment => !nextKeys.has(`${assignment.memberId}:${assignment.assignmentRole}`))
         .map(assignment => assignment.id)
+
+      const editable = await tx.pmacEvent.updateMany({
+        where: { id: sanitizedId, status: 'APPROVED' },
+        data: { updatedAt: new Date() },
+      })
+      if (editable.count !== 1) throw new Error('Staffing is locked for completed or unapproved events.')
 
       if (deletions.length) {
         await tx.pmacEventAssignment.deleteMany({
@@ -557,9 +563,11 @@ export async function respondToPmacAssignment(assignmentId: string, response: 'Y
       return { success: false, error: 'Assignment not found.' }
     }
 
-    if (assignment.event.status !== 'APPROVED' && assignment.event.status !== 'COMPLETED') {
-      return { success: false, error: 'Availability can only be updated after the PMAC event is approved.' }
+    if (assignment.event.status !== 'APPROVED') {
+      return { success: false, error: 'Coverage responses are locked for completed or unapproved events.' }
     }
+
+    if (response !== 'YES' && response !== 'NO') return { success: false, error: 'Choose Yes or No.' }
 
     if (assignment.availabilityResponse !== 'PENDING') {
       return { success: false, error: 'Your coverage response has already been submitted and cannot be changed.' }
@@ -571,6 +579,7 @@ export async function respondToPmacAssignment(assignmentId: string, response: 'Y
           id: sanitizedId,
           memberId: session.user.pmacMemberId!,
           availabilityResponse: 'PENDING',
+          event: { status: 'APPROVED' },
         },
         data: {
           availabilityResponse: response,

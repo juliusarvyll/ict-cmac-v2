@@ -16,7 +16,7 @@ export type PmacReportSummary = {
   activity: number
   archivedActivity: number
   attendanceRecords: number
-  attendanceRate: number
+  attendanceRate: number | null
   averageReadinessScore: number
   reliableMembers: number
   incompleteMemberProfiles: number
@@ -155,7 +155,7 @@ export async function buildPmacReportSummary(): Promise<PmacReportSummary> {
     prisma.pmacAttendance.groupBy({
       by: ['memberId', 'status'],
       where: {
-        recordedAt: { gte: attendanceWindow },
+        event: { startDateTime: { gte: attendanceWindow } },
         member: {
           status: 'ACTIVE',
           account: {
@@ -220,7 +220,7 @@ export async function buildPmacReportSummary(): Promise<PmacReportSummary> {
   ])
 
   const understaffedUpcoming = upcomingEvents.filter((event) => {
-    if (event.assignments.length === 0) {
+    if (!event.assignments.some(assignment => assignment.availabilityResponse === 'YES')) {
       return true
     }
 
@@ -228,7 +228,7 @@ export async function buildPmacReportSummary(): Promise<PmacReportSummary> {
       return false
     }
 
-    const assignedRoles = new Set(event.assignments.map((assignment) => assignment.assignmentRole))
+    const assignedRoles = new Set(event.assignments.filter(assignment => assignment.availabilityResponse === 'YES').map((assignment) => assignment.assignmentRole))
     return getRecommendedAssignmentRoles(event.sourceDocumentationType).some((role) => !assignedRoles.has(role))
   }).length
 
@@ -265,7 +265,7 @@ export async function buildPmacReportSummary(): Promise<PmacReportSummary> {
 
   const reliableMembers = activeMemberIds.filter((member) => {
     const attendance = attendanceByMember.get(member.id)
-    return !attendance?.total || attendance.reliable / attendance.total >= 0.85
+    return !!attendance?.total && attendance.reliable / attendance.total >= 0.85
   }).length
   const overloadedMembers = memberUpcomingWorkloads.filter((member) => member._count._all >= 4).length
 
@@ -284,7 +284,7 @@ export async function buildPmacReportSummary(): Promise<PmacReportSummary> {
     activity,
     archivedActivity,
     attendanceRecords,
-    attendanceRate: attendanceRecords ? Math.round((reliableAttendanceRecords / attendanceRecords) * 100) : 100,
+    attendanceRate: attendanceRecords ? Math.round((reliableAttendanceRecords / attendanceRecords) * 100) : null,
     averageReadinessScore,
     reliableMembers,
     incompleteMemberProfiles,

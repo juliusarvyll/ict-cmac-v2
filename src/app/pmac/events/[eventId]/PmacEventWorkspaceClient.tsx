@@ -628,7 +628,7 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{suggestion.workloadTier} load</span>
-                                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">{suggestion.attendanceRate}% attendance</span>
+                                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">{suggestion.attendanceRate === null ? 'No attendance data' : `${suggestion.attendanceRate}% attendance`}</span>
                                   {suggestion.matchedRoles.length ? (
                                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
                                       {PMAC_EVENT_DUTY_ROLE_LABELS[suggestion.matchedRoles[0] as AssignmentRow['assignmentRole']]}
@@ -992,7 +992,7 @@ const result = await runReverifiedAction(() => rejectPmacEvent(event.id, approva
                   {assignment.assignmentNotes ? (
                     <p className="mt-3 text-sm text-slate-500">{assignment.assignmentNotes}</p>
                   ) : null}
-                  {assignment.availabilityResponse === 'PENDING' ? (
+                  {permissions.canRespond && assignment.availabilityResponse === 'PENDING' ? (
                   <div className="mt-4 flex gap-3">
                     <button
                       type="button"

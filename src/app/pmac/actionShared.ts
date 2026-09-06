@@ -596,8 +596,8 @@ export function buildWorkspacePermissions(user: SessionUser, event: Awaited<Retu
   const canSubmit = !!event && isPmacCreatorRole(user.role) && (event.status === 'DRAFT' || event.status === 'REJECTED')
   const canApprove = !!event && isCoordinatorRole(user.role) && event.status === 'PENDING_APPROVAL'
   const canReject = canApprove
-  const canManageAssignments = !!event && isPmacStaffingManagerRole(user.role) && (event.status === 'APPROVED' || event.status === 'COMPLETED')
-  const canRespond = !!event && isPmacAssignmentResponderRole(user.role)
+  const canManageAssignments = !!event && isPmacStaffingManagerRole(user.role) && event.status === 'APPROVED'
+  const canRespond = !!event && isPmacAssignmentResponderRole(user.role) && event.status === 'APPROVED'
   const canRecordAttendance = !!event
     && isPmacAttendanceManagerRole(user.role)
     && (event.status === 'APPROVED' || event.status === 'COMPLETED')
@@ -759,7 +759,7 @@ export function buildWorkloadTier(upcomingAssignments: number) {
 export function buildMemberSuggestionReason(params: {
   matchedRoles: readonly PmacEventDutyRole[]
   upcomingAssignments: number
-  attendanceRate: number
+  attendanceRate: number | null
 }) {
   const reasons: string[] = []
 
@@ -773,9 +773,9 @@ export function buildMemberSuggestionReason(params: {
     reasons.push('has a light upcoming schedule')
   }
 
-  if (params.attendanceRate >= 0.9) {
+  if (params.attendanceRate !== null && params.attendanceRate >= 0.9) {
     reasons.push('has strong attendance reliability')
-  } else if (params.attendanceRate >= 0.75) {
+  } else if (params.attendanceRate !== null && params.attendanceRate >= 0.75) {
     reasons.push('has a solid recent attendance record')
   }
 
@@ -837,7 +837,7 @@ export function buildAssignmentSuggestions(params: {
       const reliableAttendance = member.attendanceRecords.filter((record) => (
         record.status === 'PRESENT' || record.status === 'LATE'
       )).length
-      const attendanceRate = completedAttendance > 0 ? reliableAttendance / completedAttendance : 1
+      const attendanceRate = completedAttendance > 0 ? reliableAttendance / completedAttendance : null
       const score = Math.max(
         0,
         Math.min(
@@ -845,7 +845,7 @@ export function buildAssignmentSuggestions(params: {
           Math.round(
             40
             + (matchedRoles.length * 14)
-            + (attendanceRate * 20)
+            + ((attendanceRate ?? 0.5) * 20)
             + Math.max(0, 22 - (upcomingAssignments * 6))
           )
         )
@@ -859,7 +859,7 @@ export function buildAssignmentSuggestions(params: {
         specialties: member.specialties.map((entry) => entry.specialty),
         matchedRoles,
         upcomingAssignments,
-        attendanceRate: Math.round(attendanceRate * 100),
+        attendanceRate: attendanceRate === null ? null : Math.round(attendanceRate * 100),
         score,
         workloadTier: buildWorkloadTier(upcomingAssignments),
         reason: buildMemberSuggestionReason({

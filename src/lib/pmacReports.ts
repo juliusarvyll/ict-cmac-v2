@@ -39,6 +39,7 @@ export type PmacReportAnalytics = {
     title: string
     startsAt: Date
     assigned: number
+    confirmed: number
     recommended: number
     pending: number
     percentage: number
@@ -63,7 +64,7 @@ export type PmacReportAnalytics = {
     name: string
     department: string
     assignments: number
-    attendanceRate: number
+    attendanceRate: number | null
     absences: number
   }>
   trends: Array<{
@@ -329,10 +330,10 @@ export async function buildPmacReportAnalytics(filters: PmacReportFilters = {}):
         },
         attendanceRecords: {
           where: {
-            recordedAt: trendRange,
+            event: { startDateTime: trendRange },
             ...(subject?.type === 'EVENT' ? { eventId: subject.id } : {}),
           },
-          select: { status: true, recordedAt: true },
+          select: { status: true, event: { select: { startDateTime: true } } },
         },
       },
     }),
@@ -346,17 +347,19 @@ export async function buildPmacReportAnalytics(filters: PmacReportFilters = {}):
 
   const coverage = coverageEvents.map((event) => {
     const recommendedRoles = event.sourceDocumentationType ? getRecommendedAssignmentRoles(event.sourceDocumentationType) : []
-    const assignedRoles = new Set(event.assignments.map((assignment) => assignment.assignmentRole))
+    const confirmed = event.assignments.filter((assignment) => assignment.availabilityResponse === 'YES')
+    const assignedRoles = new Set(confirmed.map((assignment) => assignment.assignmentRole))
     const filled = recommendedRoles.filter((role) => assignedRoles.has(role)).length
     const percentage = recommendedRoles.length
       ? Math.round((filled / recommendedRoles.length) * 100)
-      : event.assignments.length ? 100 : 0
+      : confirmed.length ? 100 : 0
 
     return {
       id: event.id,
       title: event.title,
       startsAt: event.startDateTime,
       assigned: event.assignments.length,
+      confirmed: confirmed.length,
       recommended: recommendedRoles.length,
       pending: event.assignments.filter((assignment) => assignment.availabilityResponse === 'PENDING').length,
       percentage,
@@ -407,10 +410,10 @@ export async function buildPmacReportAnalytics(filters: PmacReportFilters = {}):
       name: member.fullName,
       department: member.department ?? '',
       assignments: member.eventAssignments.length,
-      attendanceRate: member.attendanceRecords.length ? Math.round((reliable / member.attendanceRecords.length) * 100) : 100,
+      attendanceRate: member.attendanceRecords.length ? Math.round((reliable / member.attendanceRecords.length) * 100) : null,
       absences,
     }
-  }).sort((left, right) => right.assignments - left.assignments || right.attendanceRate - left.attendanceRate)
+  }).sort((left, right) => right.assignments - left.assignments || (right.attendanceRate ?? -1) - (left.attendanceRate ?? -1))
 
   const monthMap = new Map<string, { assignments: number; reliableAttendance: number; absences: number }>()
   for (const member of members) {
@@ -421,7 +424,7 @@ export async function buildPmacReportAnalytics(filters: PmacReportFilters = {}):
       monthMap.set(key, current)
     }
     for (const record of member.attendanceRecords) {
-      const key = getMonthKey(record.recordedAt)
+      const key = getMonthKey(record.event.startDateTime)
       const current = monthMap.get(key) ?? { assignments: 0, reliableAttendance: 0, absences: 0 }
       if (record.status === 'PRESENT' || record.status === 'LATE') current.reliableAttendance += 1
       if (record.status === 'ABSENT') current.absences += 1
@@ -724,7 +727,7 @@ export async function buildPmacStaffingCsv(filters: PmacReportFilters = {}) {
   ])
 
   const eventRows = upcomingEvents.map((event) => {
-    const assignedRoles = new Set(event.assignments.map((assignment) => assignment.assignmentRole))
+    const assignedRoles = new Set(event.assignments.filter((assignment) => assignment.availabilityResponse === 'YES').map((assignment) => assignment.assignmentRole))
     const missingRoles = event.sourceDocumentationType
       ? getRecommendedAssignmentRoles(event.sourceDocumentationType).filter((role) => !assignedRoles.has(role))
       : []
@@ -883,9 +886,7 @@ export async function buildPmacPerformanceCsv(filters: PmacReportFilters = {}) {
       },
       attendanceRecords: {
         where: {
-          recordedAt: {
-            ...attendanceDateRange,
-          },
+          event: { startDateTime: attendanceDateRange },
           ...(subject?.type === 'EVENT' ? { eventId: subject.id } : {}),
         },
         select: {
@@ -910,7 +911,7 @@ export async function buildPmacPerformanceCsv(filters: PmacReportFilters = {}) {
       const upcomingLoad = member.eventAssignments.filter((assignment) => assignment.event.startDateTime >= now).length
       const attendanceCount = member.attendanceRecords.length
       const reliableAttendance = member.attendanceRecords.filter((record) => record.status === 'PRESENT' || record.status === 'LATE').length
-      const attendanceRate = attendanceCount ? Math.round((reliableAttendance / attendanceCount) * 100) : 100
+      const attendanceRate = attendanceCount ? Math.round((reliableAttendance / attendanceCount) * 100) : null
       const lateOrAbsentCount = member.attendanceRecords.filter((record) => record.status === 'LATE' || record.status === 'ABSENT').length
 
       return [
@@ -920,7 +921,7 @@ export async function buildPmacPerformanceCsv(filters: PmacReportFilters = {}) {
         member.specialties.map((entry) => PMAC_SPECIALTY_LABELS[entry.specialty]).join(' | '),
         upcomingLoad,
         member.eventAssignments.length,
-        `${attendanceRate}%`,
+        attendanceRate === null ? 'No data' : `${attendanceRate}%`,
         lateOrAbsentCount,
         member.eventAssignments.map((assignment) => `${assignment.event.title} (${assignment.assignmentRole})`).join(' | '),
         member.attendanceRecords.map((record) => `${record.event.title} (${record.status})`).join(' | '),
@@ -1345,7 +1346,7 @@ async function* streamPmacStaffingCsv(filters: PmacReportFilters) {
     orderBy: { id: 'asc' },
   }))) {
     yield `${joinCsv(events.map((event) => {
-      const assignedRoles = new Set(event.assignments.map((assignment) => assignment.assignmentRole))
+      const assignedRoles = new Set(event.assignments.filter((assignment) => assignment.availabilityResponse === 'YES').map((assignment) => assignment.assignmentRole))
       const missingRoles = event.sourceDocumentationType
         ? getRecommendedAssignmentRoles(event.sourceDocumentationType).filter((role) => !assignedRoles.has(role))
         : []
@@ -1459,7 +1460,7 @@ async function* streamPmacPerformanceCsv(filters: PmacReportFilters) {
       },
       attendanceRecords: {
         where: {
-          recordedAt: attendanceDateRange,
+          event: { startDateTime: attendanceDateRange },
           ...(subject?.type === 'EVENT' ? { eventId: subject.id } : {}),
         },
         select: { status: true, event: { select: { title: true } } },
@@ -1472,7 +1473,7 @@ async function* streamPmacPerformanceCsv(filters: PmacReportFilters) {
       const reliableAttendance = member.attendanceRecords.filter((record) => record.status === 'PRESENT' || record.status === 'LATE').length
       const attendanceRate = member.attendanceRecords.length
         ? Math.round((reliableAttendance / member.attendanceRecords.length) * 100)
-        : 100
+        : null
       const lateOrAbsentCount = member.attendanceRecords.filter((record) => record.status === 'LATE' || record.status === 'ABSENT').length
       return [
         member.fullName,
@@ -1481,7 +1482,7 @@ async function* streamPmacPerformanceCsv(filters: PmacReportFilters) {
         member.specialties.map((entry) => PMAC_SPECIALTY_LABELS[entry.specialty]).join(' | '),
         upcomingLoad,
         member.eventAssignments.length,
-        `${attendanceRate}%`,
+        attendanceRate === null ? 'No data' : `${attendanceRate}%`,
         lateOrAbsentCount,
         member.eventAssignments.map((assignment) => `${assignment.event.title} (${assignment.assignmentRole})`).join(' | '),
         member.attendanceRecords.map((record) => `${record.event.title} (${record.status})`).join(' | '),
