@@ -1,6 +1,7 @@
 import type { PmacFulfillmentStatus, Prisma, Role } from '@prisma/client'
 
 import { getRecommendedAssignmentRoles } from '@/lib/pmac'
+import { getPmacDeliveryLink } from '@/lib/pmacDeliveryEvidence'
 import type { DocumentationType, PmacEventDutyRole } from '@/types'
 
 type FulfillmentActor = {
@@ -77,7 +78,7 @@ export async function syncRequestFulfillmentFromPmacEvent(
   let nextStatus: PmacFulfillmentStatus = 'RELEASED'
   if (event.status === 'REJECTED' || event.status === 'CANCELLED') {
     nextStatus = 'CANCELLED'
-  } else if (event.status === 'COMPLETED' && event.deliveredOutputs?.trim()) {
+  } else if (event.status === 'COMPLETED' && getPmacDeliveryLink(event.deliveredOutputs)) {
     nextStatus = 'DELIVERED'
   } else if (event.status === 'COMPLETED') {
     nextStatus = 'EVENT_COMPLETED'

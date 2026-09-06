@@ -231,7 +231,7 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
   const { event, permissions, viewerRole } = workspace
   const isImportedCmacEvent = event.sourceType === 'CMAC_REQUEST'
   const canViewSourceLetter = ['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY'].includes(workspace.viewerRole)
-  const canManageAttachments = permissions.canEdit || permissions.canManageAssignments || permissions.canApprove || permissions.canRecordAttendance
+  const canManageAttachments = permissions.canEditWrapUp || permissions.canEdit || permissions.canManageAssignments || permissions.canApprove || permissions.canRecordAttendance
   const attendanceSummary = {
     total: attendanceRows.length,
     unmarked: attendanceRows.filter(row => row.status === null).length,
@@ -1180,7 +1180,7 @@ const result = await runReverifiedAction(() => rejectPmacEvent(event.id, approva
             </div>
           ) : null}
 
-          {(permissions.canManageAssignments || permissions.canRecordAttendance || permissions.canApprove || event.wrapUpUpdatedAt) ? (
+          {(permissions.canEditWrapUp || permissions.canApprove || event.wrapUpUpdatedAt) ? (
             <div className="card space-y-4 p-5">
               <SectionHeader
                 icon={<FileText size={17} />}
@@ -1195,10 +1195,11 @@ const result = await runReverifiedAction(() => rejectPmacEvent(event.id, approva
                     value={wrapUpFields.deliveredOutputs}
                     onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, deliveredOutputs: currentEvent.target.value }))}
                     rows={4}
-                    disabled={!(permissions.canManageAssignments || permissions.canRecordAttendance)}
+                    disabled={!(permissions.canEditWrapUp)}
                     className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
-                    placeholder="Summarize coverage delivered, posts created, albums submitted, and final outputs."
+                    placeholder="Summarize the delivered outputs and include an https:// link to the final album, folder, or files."
                   />
+                  <p className="text-xs text-slate-500">Notes can be saved now. A completed event needs a shareable output link here before CMAC shows it as Delivered. Check that the requester can open the link.</p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Issues Encountered</label>
@@ -1206,7 +1207,7 @@ const result = await runReverifiedAction(() => rejectPmacEvent(event.id, approva
                     value={wrapUpFields.issuesEncountered}
                     onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, issuesEncountered: currentEvent.target.value }))}
                     rows={4}
-                    disabled={!(permissions.canManageAssignments || permissions.canRecordAttendance)}
+                    disabled={!(permissions.canEditWrapUp)}
                     className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
                     placeholder="Record delays, staffing issues, venue constraints, or production blockers."
                   />
@@ -1217,7 +1218,7 @@ const result = await runReverifiedAction(() => rejectPmacEvent(event.id, approva
                     value={wrapUpFields.attachmentAuditNotes}
                     onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, attachmentAuditNotes: currentEvent.target.value }))}
                     rows={4}
-                    disabled={!(permissions.canManageAssignments || permissions.canRecordAttendance)}
+                    disabled={!(permissions.canEditWrapUp)}
                     className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
                     placeholder="Note missing files, uploaded references, and anything still needed before closeout."
                   />
@@ -1228,7 +1229,7 @@ const result = await runReverifiedAction(() => rejectPmacEvent(event.id, approva
                     value={wrapUpFields.wrapUpNotes}
                     onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, wrapUpNotes: currentEvent.target.value }))}
                     rows={4}
-                    disabled={!(permissions.canManageAssignments || permissions.canRecordAttendance)}
+                    disabled={!(permissions.canEditWrapUp)}
                     className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
                     placeholder="Add recommendations, follow-up actions, or coaching notes for future events."
                   />
@@ -1239,7 +1240,7 @@ const result = await runReverifiedAction(() => rejectPmacEvent(event.id, approva
                 <p className="text-xs text-slate-400">
                   {event.wrapUpUpdatedAt ? `Last updated ${formatDateTime(event.wrapUpUpdatedAt)}` : 'No wrap-up saved yet.'}
                 </p>
-                {(permissions.canManageAssignments || permissions.canRecordAttendance) ? (
+                {(permissions.canEditWrapUp) ? (
                   <button
                     type="button"
                     disabled={isPending}

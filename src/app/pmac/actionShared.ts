@@ -615,6 +615,7 @@ export function buildWorkspacePermissions(user: SessionUser, event: Awaited<Retu
     canApprove,
     canReject,
     canManageAssignments,
+    canEditWrapUp: !!event && (isCoordinatorRole(user.role) || isPmacStaffingManagerRole(user.role)) && (event.status === 'APPROVED' || event.status === 'COMPLETED'),
     canRespond,
     canRecordAttendance,
     canComplete,
