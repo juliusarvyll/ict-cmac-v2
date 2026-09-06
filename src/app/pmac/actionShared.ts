@@ -691,7 +691,7 @@ export function buildPollWorkspacePermissions(
     && isPmacPollManagerRole(user.role)
     && effectiveStatus === 'OPEN'
     && canClosePmacPoll(user.role, user.id, poll.createdById)
-  const canArchive = !!poll && isPmacPollManagerRole(user.role) && poll.status !== 'ARCHIVED'
+  const canArchive = !!poll && isPmacPollManagerRole(user.role) && (poll.status === 'DRAFT' || poll.status === 'CLOSED')
   const canVote = !!poll
     && isPmacPollVoterRole(user.role)
     && !!user.pmacMemberId

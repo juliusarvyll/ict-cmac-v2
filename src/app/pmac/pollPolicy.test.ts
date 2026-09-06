@@ -67,4 +67,11 @@ describe('PMAC poll policy', () => {
     expect(isDuplicatePmacVoteError({ code: 'P2025' })).toBe(false)
     expect(isDuplicatePmacVoteError(new Error('failure'))).toBe(false)
   })
+
+  it('does not offer archival as an alternative to closing an open poll', () => {
+    const user = { id: 'other', name: 'Coordinator', role: 'CMAC_COORDINATOR' as const, pmacMemberId: null }
+    const now = new Date('2026-07-19T12:00:00Z')
+    expect(buildPollWorkspacePermissions(user, openPoll as never, null, now).canArchive).toBe(false)
+    expect(buildPollWorkspacePermissions(user, { ...openPoll, status: 'CLOSED' } as never, null, now).canArchive).toBe(true)
+  })
 })

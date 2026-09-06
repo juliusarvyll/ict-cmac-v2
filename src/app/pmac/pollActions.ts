@@ -157,7 +157,8 @@ export async function getPmacPollWorkspace(pollId: string) {
       ...poll,
       status: getEffectivePollStatus(poll, now),
       attachments: 'attachments' in poll && Array.isArray(poll.attachments) ? poll.attachments : [],
-      activityLogs: 'activityLogs' in poll && Array.isArray(poll.activityLogs) ? poll.activityLogs : [],
+      activityLogs: 'activityLogs' in poll && Array.isArray(poll.activityLogs)
+        ? poll.activityLogs.filter((entry) => entry.action !== 'VOTE_CAST') : [],
       votes: permissions.canViewResults ? poll.votes : [],
     },
     voteSummary: permissions.canViewResults ? voteSummary : null,
@@ -425,14 +426,18 @@ export async function archivePmacPoll(pollId: string) {
       return { success: false, error: 'This poll is already archived.' }
     }
 
+    if (poll.status === 'OPEN') {
+      return { success: false, error: 'Close the poll before archiving it. Only the creator, PMAC Director, or PMAC Secretary can close it.' }
+    }
+
     await prisma.$transaction(async (tx) => {
-      await tx.pmacPoll.update({
-        where: { id: sanitizedId },
+      const archived = await tx.pmacPoll.updateMany({
+        where: { id: sanitizedId, status: { in: ['DRAFT', 'CLOSED'] } },
         data: {
           status: 'ARCHIVED',
-          ...(poll.status === 'OPEN' ? { closesAt: new Date() } : {}),
         },
       })
+      if (archived.count !== 1) throw new Error('The poll changed. Refresh before archiving it.')
 
       await recordPmacActivity(tx, {
         entityType: 'POLL',
@@ -541,7 +546,7 @@ export async function castPmacVote(pollId: string, selectedOption: PmacVoteChoic
         pollId: sanitizedId,
         ...getActivityActor(session.user),
         action: 'VOTE_CAST',
-        summary: `Recorded a ${selectedOption.toLowerCase()} vote in a PMAC poll.`,
+        summary: 'Recorded a vote in a PMAC poll.',
       })
     })
 

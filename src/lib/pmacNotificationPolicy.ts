@@ -29,6 +29,7 @@ export function buildPmacActivityNotificationWhere(
   const baseWhere: Prisma.PmacActivityLogWhereInput = {
     createdAt: { gte: since },
     entityType: { not: 'PROJECT' },
+    action: { not: 'VOTE_CAST' },
   }
 
   if (user.role === 'PMAC_DIRECTOR' || user.role === 'PMAC_ASSISTANT_DIRECTOR' || user.role === 'PMAC_SECRETARY') {

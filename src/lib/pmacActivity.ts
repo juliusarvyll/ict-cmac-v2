@@ -298,6 +298,7 @@ export async function getPmacActivityFeed(user: SessionUser, options: PmacActivi
     AND: [
       accessWhere,
       { archivedAt: null },
+      { action: { not: 'VOTE_CAST' } },
     ],
   }
   const filterWhere = buildPmacActivityFilterWhere(options)

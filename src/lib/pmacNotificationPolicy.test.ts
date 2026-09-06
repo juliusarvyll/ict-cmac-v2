@@ -11,6 +11,7 @@ describe('PMAC notification recipient policy', () => {
       expect(buildPmacActivityNotificationWhere({ role, pmacMemberId: null }, since)).toEqual({
         createdAt: { gte: since },
         entityType: { not: 'PROJECT' },
+        action: { not: 'VOTE_CAST' },
       })
     },
   )
@@ -19,6 +20,7 @@ describe('PMAC notification recipient policy', () => {
     expect(buildPmacActivityNotificationWhere({ role: 'CMAC_COORDINATOR', pmacMemberId: null }, since)).toEqual({
       createdAt: { gte: since },
       entityType: 'EVENT',
+      action: { not: 'VOTE_CAST' },
     })
   })
 
