@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getDutyRolesForSpecialties, PMAC_EXECUTIVE_TITLE_LABELS, getRecommendedAssignmentRoles, isPmacAssignmentResponderRole, isPmacAttendanceManagerRole, isPmacCreatorRole, isPmacEventManagerRole, isPmacPollManagerRole, isPmacPollMonitorRole, isPmacPollVoterRole, isPmacStaffingManagerRole, PMAC_ASSIGNMENT_TEMPLATES, PMAC_ATTENDANCE_STATUSES, PMAC_EVENT_DUTY_ROLES, PMAC_EVENT_DUTY_ROLE_LABELS, PMAC_OPERATIONAL_ROLES, PMAC_OVERSIGHT_ROLES, PMAC_POLL_RESULTS_VISIBILITY, PMAC_POLL_TYPES, PMAC_POLL_VOTER_ROLES, PMAC_PROJECT_MILESTONE_STATUSES, PMAC_PROJECT_STATUSES, PMAC_VOTE_CHOICES } from '@/lib/pmac'
+import { canClosePmacPoll, getDutyRolesForSpecialties, PMAC_EXECUTIVE_TITLE_LABELS, getRecommendedAssignmentRoles, isPmacAssignmentResponderRole, isPmacAttendanceManagerRole, isPmacCreatorRole, isPmacEventManagerRole, isPmacPollManagerRole, isPmacPollMonitorRole, isPmacPollVoterRole, isPmacStaffingManagerRole, PMAC_ATTENDANCE_STATUSES, PMAC_EVENT_DUTY_ROLES, PMAC_EVENT_DUTY_ROLE_LABELS, PMAC_OPERATIONAL_ROLES, PMAC_OVERSIGHT_ROLES, PMAC_POLL_RESULTS_VISIBILITY, PMAC_POLL_TYPES, PMAC_POLL_VOTER_ROLES, PMAC_PROJECT_MILESTONE_STATUSES, PMAC_PROJECT_STATUSES, PMAC_VOTE_CHOICES } from '@/lib/pmac'
 import { hasPmacV4Delegates, prisma } from '@/lib/prisma'
 import { assertActionAccess } from '@/lib/security'
 import { sanitizeMultilineText, sanitizeSingleLineText } from '@/lib/sanitization'
@@ -161,6 +161,16 @@ export const PMAC_EVENT_WORKSPACE_INCLUDE_BASE = {
     select: {
       name: true,
       role: true,
+    },
+  },
+  sourceRequest: {
+    select: {
+      id: true,
+      letterUrl: true,
+      eventDetails: true,
+      needsSameDayEdit: true,
+      needsSameDayPhoto: true,
+      pmacFulfillmentStatus: true,
     },
   },
   assignments: {
@@ -458,6 +468,24 @@ export function isPollClosedForResults(
   return poll.status === 'CLOSED' || poll.status === 'ARCHIVED' || (!!poll.closesAt && poll.closesAt <= now)
 }
 
+export function getEffectivePollStatus(
+  poll: Pick<Prisma.PmacPollUncheckedCreateInput, 'closesAt'> & {
+    status: NonNullable<Prisma.PmacPollUncheckedCreateInput['status']>
+  },
+  now = new Date()
+) {
+  return poll.status === 'OPEN' && poll.closesAt && poll.closesAt <= now
+    ? 'CLOSED' as const
+    : poll.status
+}
+
+export function isDuplicatePmacVoteError(error: unknown) {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'P2002'
+}
+
 export function canViewPollResults(
   poll: Pick<Prisma.PmacPollUncheckedCreateInput, 'status' | 'closesAt' | 'resultsVisibility'>,
   now = new Date()
@@ -510,9 +538,12 @@ export async function getViewerSession() {
   return session
 }
 
-export async function assertPmacActionSession(allowedRoles: readonly Role[]) {
+export async function assertPmacActionSession(
+  allowedRoles: readonly Role[],
+  options: { zeroTrust?: boolean } = {}
+) {
   const session = await assertActionAccess(allowedRoles, {
-    zeroTrust: allowedRoles.includes('CMAC_COORDINATOR'),
+    zeroTrust: options.zeroTrust ?? allowedRoles.includes('CMAC_COORDINATOR'),
   })
 
   if (!isCoordinatorRole(session.user.role) && !session.user.pmacMemberId) {
@@ -569,8 +600,16 @@ export function buildWorkspacePermissions(user: SessionUser, event: Awaited<Retu
   const canReject = canApprove
   const canManageAssignments = !!event && isPmacStaffingManagerRole(user.role) && (event.status === 'APPROVED' || event.status === 'COMPLETED')
   const canRespond = !!event && isPmacAssignmentResponderRole(user.role)
-  const canRecordAttendance = !!event && isPmacAttendanceManagerRole(user.role) && (event.status === 'APPROVED' || event.status === 'COMPLETED')
+  const canRecordAttendance = !!event
+    && isPmacAttendanceManagerRole(user.role)
+    && (event.status === 'APPROVED' || event.status === 'COMPLETED')
+    && event.startDateTime.getTime() <= Date.now()
   const canComplete = !!event && isPmacStaffingManagerRole(user.role) && event.status === 'APPROVED'
+  const canAcknowledgeHandoff = !!event
+    && isPmacStaffingManagerRole(user.role)
+    && event.sourceType === 'CMAC_REQUEST'
+    && event.status === 'APPROVED'
+    && !event.handoffAcknowledgedAt
 
   return {
     canEdit,
@@ -581,6 +620,7 @@ export function buildWorkspacePermissions(user: SessionUser, event: Awaited<Retu
     canRespond,
     canRecordAttendance,
     canComplete,
+    canAcknowledgeHandoff,
   }
 }
 
@@ -644,9 +684,13 @@ export function buildPollWorkspacePermissions(
   viewerVote: { id: string } | null,
   now = new Date()
 ) {
-  const canEdit = !!poll && isPmacPollManagerRole(user.role) && poll.status === 'DRAFT'
-  const canOpen = !!poll && isPmacPollManagerRole(user.role) && poll.status === 'DRAFT'
-  const canClose = !!poll && isPmacPollManagerRole(user.role) && poll.status === 'OPEN'
+  const effectiveStatus = poll ? getEffectivePollStatus(poll, now) : null
+  const canEdit = !!poll && isPmacPollManagerRole(user.role) && effectiveStatus === 'DRAFT'
+  const canOpen = !!poll && isPmacPollManagerRole(user.role) && effectiveStatus === 'DRAFT'
+  const canClose = !!poll
+    && isPmacPollManagerRole(user.role)
+    && effectiveStatus === 'OPEN'
+    && canClosePmacPoll(user.role, user.id, poll.createdById)
   const canArchive = !!poll && isPmacPollManagerRole(user.role) && poll.status !== 'ARCHIVED'
   const canVote = !!poll
     && isPmacPollVoterRole(user.role)
@@ -752,12 +796,6 @@ export function buildWrapUpFilledCount(event: {
     event.attachmentAuditNotes,
     event.wrapUpNotes,
   ].filter((value) => !!value && value.trim().length > 0).length
-}
-
-export function buildAssignmentTemplateRows(sourceDocumentationType: DocumentationType | null | undefined) {
-  return PMAC_ASSIGNMENT_TEMPLATES.filter((template) => (
-    !sourceDocumentationType || template.documentationTypes.some((type) => type === sourceDocumentationType)
-  ))
 }
 
 export function buildAssignmentSuggestions(params: {

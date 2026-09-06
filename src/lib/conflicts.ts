@@ -1,4 +1,4 @@
-import type { Prisma, RequestStatus } from "@prisma/client"
+import type { PmacEventStatus, Prisma, RequestStatus } from "@prisma/client"
 import { differenceInCalendarDays, isSameDay, max, min } from "date-fns"
 
 import { prisma } from "@/lib/prisma"
@@ -19,7 +19,7 @@ interface BookingRecord {
   endDate: Date | null
   startTime: string | null
   endTime: string | null
-  status: RequestStatus
+  status: RequestStatus | PmacEventStatus
   eventVenue: string
 }
 
@@ -99,10 +99,17 @@ function hasTimeOverlapForSharedDay(
   requestEndTime: string | undefined,
   booking: BookingRecord
 ) {
-  const bookingStart = booking.eventDate
-  const bookingEnd = booking.endDate ?? booking.eventDate
-  const overlapStart = max([requestStart, bookingStart])
-  const overlapEnd = min([requestEnd, bookingEnd])
+  const toLocalDay = (value: Date) => {
+    const day = new Date(value)
+    day.setHours(0, 0, 0, 0)
+    return day
+  }
+  const normalizedRequestStart = toLocalDay(requestStart)
+  const normalizedRequestEnd = toLocalDay(requestEnd)
+  const bookingStart = toLocalDay(booking.eventDate)
+  const bookingEnd = toLocalDay(booking.endDate ?? booking.eventDate)
+  const overlapStart = max([normalizedRequestStart, bookingStart])
+  const overlapEnd = min([normalizedRequestEnd, bookingEnd])
 
   if (overlapStart > overlapEnd) {
     return false
@@ -114,8 +121,8 @@ function hasTimeOverlapForSharedDay(
 
   const requestWindow = getWindowForDay(
     overlapStart,
-    requestStart,
-    requestEnd,
+    normalizedRequestStart,
+    normalizedRequestEnd,
     requestStartTime,
     requestEndTime
   )
@@ -148,7 +155,7 @@ export async function findRequestConflicts({
   endTime,
   eventVenue,
   currentRequestId,
-}: ConflictCheckInput, database: Pick<Prisma.TransactionClient, 'serviceRequest'> = prisma): Promise<ConflictCheckResult> {
+}: ConflictCheckInput, database: Pick<Prisma.TransactionClient, 'serviceRequest' | 'pmacEvent'> = prisma): Promise<ConflictCheckResult> {
   if (!startDate) return EMPTY_RESULT
 
   const requestStart = new Date(startDate)
@@ -158,7 +165,8 @@ export async function findRequestConflicts({
     maxLength: 191,
   })
 
-  const overlappingBookings = await database.serviceRequest.findMany({
+  const [requestBookings, manualPmacEvents] = await Promise.all([
+    database.serviceRequest.findMany({
       where: {
         deletedAt: null,
         id: currentRequestId ? { not: currentRequestId } : undefined,
@@ -183,10 +191,46 @@ export async function findRequestConflicts({
         status: true,
         eventVenue: true,
       },
-    })
+    }),
+    database.pmacEvent.findMany({
+      where: {
+        sourceType: 'MANUAL',
+        status: { in: ['PENDING_APPROVAL', 'APPROVED'] },
+        startDateTime: { lt: new Date(requestEnd.getTime() + (24 * 60 * 60 * 1000)) },
+        endDateTime: { gt: requestStart },
+      },
+      select: {
+        title: true,
+        startDateTime: true,
+        endDateTime: true,
+        status: true,
+        venue: true,
+      },
+    }),
+  ])
+
+  const overlappingBookings: BookingRecord[] = [
+    ...requestBookings,
+    ...manualPmacEvents.map((event) => {
+      const eventDate = new Date(event.startDateTime)
+      const endDate = new Date(event.endDateTime)
+      eventDate.setHours(0, 0, 0, 0)
+      endDate.setHours(0, 0, 0, 0)
+
+      return {
+        eventTitle: event.title,
+        eventDate,
+        endDate,
+        startTime: event.startDateTime.toTimeString().slice(0, 5),
+        endTime: event.endDateTime.toTimeString().slice(0, 5),
+        status: event.status,
+        eventVenue: event.venue,
+      }
+    }),
+  ]
 
   const conflicts = overlappingBookings.filter((booking) => {
-    if (normalizedVenue && booking.eventVenue !== normalizedVenue) {
+    if (normalizedVenue && booking.eventVenue.trim().toLocaleLowerCase() !== normalizedVenue.toLocaleLowerCase()) {
       return false
     }
 

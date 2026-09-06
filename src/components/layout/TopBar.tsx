@@ -20,6 +20,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/new-request': 'New Request',
   '/calendar': 'Event Calendar',
   '/analytics': 'Analytics',
+  '/logs': 'CMAC Request Audit',
   '/admin': 'Admin',
   '/coordinator/pmac': 'PMAC Directory',
   '/coordinator/pmac/officers': 'Officer Assignments',
@@ -178,15 +179,17 @@ export default function TopBar() {
     setPopNotification((current) => current?.id === id ? null : current)
   }
 
-  const handleNotifClick = async (notification: AppNotification) => {
+  const handleNotifClick = (notification: AppNotification) => {
     setNotifications((previous) => previous.map((item) => (
       item.id === notification.id ? { ...item, isRead: true } : item
     )))
     announceNotificationsRead([notification.id])
     setPopNotification(null)
     setShowNotifs(false)
-    await markNotificationAsRead(notification.id, notification.module)
     router.push(notification.href)
+    void markNotificationAsRead(notification.id, notification.module).catch((error) => {
+      console.error('MARK_NOTIFICATION_READ_ERROR:', error)
+    })
   }
 
   const pageTitle = PAGE_TITLES[pathname]
@@ -212,12 +215,15 @@ export default function TopBar() {
               'relative p-2.5 rounded-2xl transition-all duration-300',
               showNotifs ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50',
               visibleNotifs.length ? 'shadow-sm ring-1 ring-emerald-100' : '',
-              hasHighPriorityNotification ? 'text-amber-600 ring-amber-200 animate-pulse' : ''
+              hasHighPriorityNotification ? 'text-amber-600 ring-amber-200' : ''
             )}
           >
             <Bell size={22} />
             {visibleNotifs.length > 0 && (
-              <span className="absolute -right-1 -top-1 flex min-w-5 items-center justify-center rounded-full border-2 border-white bg-emerald-600 px-1 text-[10px] font-black text-white shadow-sm">
+              <span className={clsx(
+                'absolute -right-1 -top-1 flex min-w-5 items-center justify-center rounded-full border-2 border-white bg-emerald-600 px-1 text-[10px] font-black text-white shadow-sm',
+                hasHighPriorityNotification && 'motion-safe:animate-pulse'
+              )}>
                 {visibleNotifs.length > 9 ? '9+' : visibleNotifs.length}
               </span>
             )}

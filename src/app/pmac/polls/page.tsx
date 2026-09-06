@@ -1,10 +1,10 @@
-import { PMAC_OPERATIONAL_ROLES } from '@/lib/pmac'
+import { PMAC_OPERATIONAL_ROLES, PMAC_OVERSIGHT_ROLES } from '@/lib/pmac'
 import { requireRoleAccess } from '@/lib/security'
 
 import PmacPollsPageClient from './PmacPollsPageClient'
 
 export default async function PmacPollsPage() {
-  const session = await requireRoleAccess(PMAC_OPERATIONAL_ROLES, {
+  const session = await requireRoleAccess([...PMAC_OPERATIONAL_ROLES, ...PMAC_OVERSIGHT_ROLES], {
     nextPath: '/pmac/polls',
   })
 

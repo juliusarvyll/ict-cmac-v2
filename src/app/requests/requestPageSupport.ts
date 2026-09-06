@@ -6,6 +6,17 @@ export type ConflictResult = Awaited<ReturnType<typeof checkConflict>>
 export type ConflictItem = ConflictResult['conflicts'][number]
 export type SameDayEventItem = ConflictResult['sameDayEvents'][number]
 
+export const PMAC_FULFILLMENT_LABELS = {
+  NOT_APPLICABLE: 'Not applicable',
+  RELEASED: 'Released to PMAC',
+  ACKNOWLEDGED: 'Acknowledged by PMAC',
+  STAFFING: 'Staffing in progress',
+  READY: 'Coverage ready',
+  EVENT_COMPLETED: 'Event completed',
+  DELIVERED: 'Outputs delivered',
+  CANCELLED: 'PMAC work cancelled',
+} as const
+
 export function getRequesterName(request: RequestItem) {
   const letterContent = request.letterContent
   if (typeof letterContent === 'string') {
@@ -23,7 +34,7 @@ export function getSecretaryTitle(school?: string) {
   return `${SCHOOL_LABELS[school as keyof typeof SCHOOL_LABELS] || school} Secretary`
 }
 
-export function getSlaLabel(request: RequestItem, referenceTime: number) {
+export function getAttentionStatusLabel(request: RequestItem, referenceTime: number) {
   const createdAt = new Date(request.createdAt)
   const stageStartedAt = request.status === 'COORDINATOR_APPROVED' && request.coordinatorApprovedAt
     ? new Date(request.coordinatorApprovedAt)

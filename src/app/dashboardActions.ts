@@ -30,7 +30,7 @@ function getWorkflowStageLabel(status: string) {
   }
 }
 
-function getSlaLabel(request: { status: string; createdAt: Date; coordinatorApprovedAt: Date | null; eventDate: Date }) {
+function getAttentionStatusLabel(request: { status: string; createdAt: Date; coordinatorApprovedAt: Date | null; eventDate: Date }) {
   const now = new Date()
   const stageStartedAt = request.status === 'COORDINATOR_APPROVED'
     ? request.coordinatorApprovedAt ?? request.createdAt
@@ -79,7 +79,6 @@ export async function getDashboardStats() {
     photoCount: 0,
     videoCount: 0,
     bothCount: 0,
-    recent: [],
       notifications: [],
       workflowTimeline: [],
       user: session.user,
@@ -116,7 +115,15 @@ export async function getDashboardStats() {
       where: whereClause,
       orderBy: { createdAt: 'desc' },
       take: 5,
-      select: { id: true, eventTitle: true, school: true, eventDate: true, status: true, serviceType: true, createdAt: true, coordinatorApprovedAt: true, secretaryId: true, secretary: { select: { name: true } } }
+      select: {
+        id: true,
+        eventTitle: true,
+        school: true,
+        eventDate: true,
+        status: true,
+        createdAt: true,
+        coordinatorApprovedAt: true,
+      },
     })
     
     const notifications = await getNotificationFeed(user, 5)
@@ -126,7 +133,7 @@ export async function getDashboardStats() {
       school: request.school,
       status: request.status,
       stageLabel: getWorkflowStageLabel(request.status),
-      slaLabel: getSlaLabel(request),
+      attentionStatusLabel: getAttentionStatusLabel(request),
       eventDate: request.eventDate,
       createdAt: request.createdAt,
       href: `/requests?requestId=${encodeURIComponent(request.id)}`,
@@ -134,7 +141,7 @@ export async function getDashboardStats() {
 
     return {
       total, pending, approved, rejected, coordApproved, pmacApproved, cmacApproved, unassignedService, photoCount, videoCount, bothCount,
-      recent, notifications, workflowTimeline, user, dbUnavailable: false
+      notifications, workflowTimeline, user, dbUnavailable: false
     }
   } catch (error) {
     console.error('DASHBOARD_STATS_ERROR:', error)

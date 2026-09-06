@@ -38,15 +38,20 @@ describe('pmacRequestSync', () => {
     expect(schedule.endDateTime.getMinutes()).toBe(45)
   })
 
-  it('falls back to a safe minimum duration when request times are incomplete', () => {
-    const schedule = buildPmacEventScheduleFromRequest({
+  it('rejects an invalid or incomplete PMAC schedule instead of inventing a duration', () => {
+    expect(() => buildPmacEventScheduleFromRequest({
       eventDate: new Date('2026-07-10T00:00:00'),
       endDate: null,
       startTime: '17:00',
       endTime: '08:00',
-    })
+    })).toThrow('end time must be after')
 
-    expect(schedule.endDateTime.getTime()).toBeGreaterThan(schedule.startDateTime.getTime())
+    expect(() => buildPmacEventScheduleFromRequest({
+      eventDate: new Date('2026-07-10T00:00:00'),
+      endDate: null,
+      startTime: null,
+      endTime: null,
+    })).toThrow('require confirmed start and end times')
   })
 
   it('updates imported events found by source request id', async () => {
@@ -65,6 +70,7 @@ describe('pmacRequestSync', () => {
         create: vi.fn(),
         deleteMany: vi.fn(),
       },
+      serviceRequest: { update: vi.fn() },
     }
 
     await syncPmacEventFromServiceRequest(tx as never, {
@@ -82,6 +88,9 @@ describe('pmacRequestSync', () => {
       campusType: 'IN_CAMPUS',
       letterContent: 'Raw formal request letter should stay out of the PMAC operations brief.',
       eventDetails: 'Use the latest approved request data.',
+      needsSameDayEdit: false,
+      needsSameDayPhoto: true,
+      pmacFulfillmentStatus: 'NOT_APPLICABLE',
       status: 'DIRECTOR_APPROVED',
       deletedAt: null,
       secretaryId: 'secretary-1',
@@ -110,6 +119,7 @@ describe('pmacRequestSync', () => {
     }))
     expect(update.mock.calls[0][0].data.description).toContain('Approved CMAC request routed to PMAC')
     expect(update.mock.calls[0][0].data.description).toContain('Request Notes: Use the latest approved request data.')
+    expect(update.mock.calls[0][0].data.description).toContain('Same-day photo delivery')
     expect(update.mock.calls[0][0].data.description).not.toContain('Raw formal request letter')
     expect(tx.pmacEvent.create).not.toHaveBeenCalled()
   })
@@ -125,6 +135,7 @@ describe('pmacRequestSync', () => {
         }),
         update,
       },
+      serviceRequest: { update: vi.fn() },
     }
 
     const retained = await syncPmacEventFromServiceRequest(tx as never, {
@@ -142,6 +153,9 @@ describe('pmacRequestSync', () => {
       campusType: 'IN_CAMPUS',
       letterContent: null,
       eventDetails: null,
+      needsSameDayEdit: false,
+      needsSameDayPhoto: false,
+      pmacFulfillmentStatus: 'RELEASED',
       status: 'CANCELLED',
       deletedAt: null,
       secretaryId: 'secretary-1',
@@ -156,7 +170,7 @@ describe('pmacRequestSync', () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'pmac-event-1' },
       data: expect.objectContaining({
-        status: 'REJECTED',
+        status: 'CANCELLED',
         sourceLabel: 'Retained from a closed CMAC request',
       }),
     }))

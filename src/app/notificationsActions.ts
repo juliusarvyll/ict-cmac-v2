@@ -23,8 +23,13 @@ export async function markNotificationAsRead(notificationId: string, module: 'CO
     return { success: false, error: 'Authentication required.' }
   }
 
-  await markNotificationRead(session.user.id, notificationId, module)
-  return { success: true }
+  try {
+    await markNotificationRead(session.user.id, notificationId, module)
+    return { success: true }
+  } catch (error) {
+    console.error('MARK_NOTIFICATION_READ_ERROR:', error)
+    return { success: false, error: 'Unable to save notification read state.' }
+  }
 }
 
 export async function markAllNotificationsAsRead(notifications: Array<{ id: string; module: 'CORE' | 'PMAC' }>) {
@@ -33,6 +38,11 @@ export async function markAllNotificationsAsRead(notifications: Array<{ id: stri
     return { success: false, error: 'Authentication required.' }
   }
 
-  await markNotificationsRead(session.user.id, notifications)
-  return { success: true }
+  try {
+    await markNotificationsRead(session.user.id, notifications)
+    return { success: true }
+  } catch (error) {
+    console.error('MARK_ALL_NOTIFICATIONS_READ_ERROR:', error)
+    return { success: false, error: 'Unable to save notification read state.' }
+  }
 }

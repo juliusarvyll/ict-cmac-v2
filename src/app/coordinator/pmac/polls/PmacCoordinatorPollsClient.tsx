@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Eye, Lock } from 'lucide-react'
+import Link from 'next/link'
+import { Eye, Lock, Plus } from 'lucide-react'
 import clsx from 'clsx'
 
 import { getPmacPolls, getPmacPollWorkspace } from '@/app/pmac/actions'
@@ -99,10 +100,16 @@ export default function PmacCoordinatorPollsClient() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 animate-fade-in">
-      <div className="space-y-2">
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">CMAC Oversight</p>
-        <h2 className="font-display text-3xl font-bold text-slate-800">PMAC Poll Oversight</h2>
-        <p className="text-sm text-slate-500">Monitor PMAC governance activity, participation, and results visibility without interrupting the normal club voting flow.</p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-2">
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">CMAC Oversight</p>
+          <h2 className="font-display text-3xl font-bold text-slate-800">PMAC Poll Oversight</h2>
+          <p className="text-sm text-slate-500">Monitor PMAC governance activity, participation, and results visibility.</p>
+        </div>
+        <Link href="/pmac/polls/new" className="inline-flex items-center gap-2 rounded-xl bg-[#064e3b] px-4 py-2 text-sm font-semibold text-white hover:bg-[#065f46]">
+          <Plus size={14} />
+          Create Poll
+        </Link>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">

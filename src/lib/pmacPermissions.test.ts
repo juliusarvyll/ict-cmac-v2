@@ -4,6 +4,7 @@ import {
   PMAC_EXECUTIVE_BRANCH_SPECIALTY,
   PMAC_EXECUTIVE_TITLE_LABELS,
   PMAC_EXECUTIVE_TITLES,
+  canClosePmacPoll,
   isPmacAssignmentResponderRole,
   isPmacAttendanceManagerRole,
   isPmacCreatorRole,
@@ -42,10 +43,27 @@ describe('PMAC role permissions', () => {
 
   it('keeps poll management separate from voting and monitoring', () => {
     expect(isPmacPollManagerRole('CMAC_COORDINATOR')).toBe(true)
-    expect(isPmacPollManagerRole('PMAC_SECRETARY')).toBe(false)
+    expect(isPmacPollManagerRole('PMAC_DIRECTOR')).toBe(true)
+    expect(isPmacPollManagerRole('PMAC_ASSISTANT_DIRECTOR')).toBe(true)
+    expect(isPmacPollManagerRole('PMAC_SECRETARY')).toBe(true)
+    expect(isPmacPollManagerRole('PMAC_EXECUTIVE')).toBe(true)
+    expect(isPmacPollManagerRole('PMAC_MEMBER')).toBe(false)
     expect(isPmacPollMonitorRole('PMAC_SECRETARY')).toBe(true)
     expect(isPmacPollVoterRole('PMAC_MEMBER')).toBe(true)
+    expect(isPmacPollVoterRole('PMAC_EXECUTIVE')).toBe(true)
+    expect(isPmacPollVoterRole('PMAC_SECRETARY')).toBe(true)
+    expect(isPmacPollVoterRole('PMAC_DIRECTOR')).toBe(true)
+    expect(isPmacPollVoterRole('PMAC_ASSISTANT_DIRECTOR')).toBe(true)
     expect(isPmacPollVoterRole('CMAC_COORDINATOR')).toBe(false)
+  })
+
+  it('allows only the creator, director, or secretary to close a poll', () => {
+    expect(canClosePmacPoll('PMAC_EXECUTIVE', 'creator-1', 'creator-1')).toBe(true)
+    expect(canClosePmacPoll('CMAC_COORDINATOR', 'creator-1', 'creator-1')).toBe(true)
+    expect(canClosePmacPoll('PMAC_DIRECTOR', 'director-1', 'creator-1')).toBe(true)
+    expect(canClosePmacPoll('PMAC_SECRETARY', 'secretary-1', 'creator-1')).toBe(true)
+    expect(canClosePmacPoll('PMAC_ASSISTANT_DIRECTOR', 'assistant-1', 'creator-1')).toBe(false)
+    expect(canClosePmacPoll('PMAC_EXECUTIVE', 'executive-1', 'creator-1')).toBe(false)
   })
 
   it('allows only the configured launch roles to launch PMAC projects', () => {

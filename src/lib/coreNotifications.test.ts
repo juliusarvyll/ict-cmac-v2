@@ -17,7 +17,7 @@ describe('CMAC notification visibility', () => {
     expect(buildCoreNotificationWhere({ ...baseUser, role: 'SECRETARY' })).toEqual({
       OR: expect.arrayContaining([
         expect.objectContaining({
-          action: { in: ['COORDINATOR_APPROVED', 'DIRECTOR_APPROVED', 'REVISION_REQUESTED', 'REJECTED', 'CANCELLED'] },
+          action: { in: ['COORDINATOR_APPROVED', 'DIRECTOR_APPROVED', 'REVISION_REQUESTED', 'REJECTED', 'CANCELLED', 'PMAC_FULFILLMENT_UPDATED'] },
           request: { is: expect.objectContaining({ secretaryId: 'user-1' }) },
         }),
         expect.objectContaining({
@@ -34,19 +34,17 @@ describe('CMAC notification visibility', () => {
       OR: expect.arrayContaining([
         expect.objectContaining({ action: { in: ['SUBMITTED', 'RESUBMITTED'] } }),
         expect.objectContaining({ action: 'CANCELLED' }),
+        expect.objectContaining({ action: 'PMAC_FULFILLMENT_UPDATED' }),
       ]),
     }))
   })
 
-  it('routes only coordinator-approved requests to the director', () => {
+  it('routes coordinator approvals and PMAC fulfillment updates to the director', () => {
     expect(buildCoreNotificationWhere({ ...baseUser, role: 'ICT_DIRECTOR' })).toEqual({
-      action: 'COORDINATOR_APPROVED',
-      request: {
-        is: {
-          deletedAt: null,
-          status: 'COORDINATOR_APPROVED',
-        },
-      },
+      OR: expect.arrayContaining([
+        expect.objectContaining({ action: 'COORDINATOR_APPROVED' }),
+        expect.objectContaining({ action: 'PMAC_FULFILLMENT_UPDATED' }),
+      ]),
     })
   })
 

@@ -194,7 +194,7 @@ export default function PmacAssignmentsPageClient({ role }: { role: string }) {
                       )}
                     </div>
 
-                    {canRespond ? (
+                    {canRespond && assignment.availabilityResponse === 'PENDING' ? (
                       <div className="flex gap-2 lg:justify-end">
                         <button
                           type="button"
@@ -213,6 +213,8 @@ export default function PmacAssignmentsPageClient({ role }: { role: string }) {
                           No
                         </button>
                       </div>
+                    ) : canRespond ? (
+                      <p className="text-xs font-semibold text-slate-500 lg:text-right">Response locked</p>
                     ) : null}
                   </div>
                 ))}

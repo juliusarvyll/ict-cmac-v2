@@ -3,12 +3,14 @@
 import { unstable_noStore as noStore } from 'next/cache'
 import { calculatePmacReadinessScore, getRecommendedAssignmentRoles, getPmacReadinessLabel, isPmacAssignmentResponderRole, isPmacAttendanceManagerRole, isPmacStaffingManagerRole } from '@/lib/pmac'
 import { recordPmacActivity } from '@/lib/pmacActivity'
+import { getPmacCompletionBlocker, syncRequestFulfillmentFromPmacEvent } from '@/lib/pmacFulfillment'
 import { prisma } from '@/lib/prisma'
 import { revalidatePmacViews } from '@/lib/pmacRevalidation'
+import { revalidateRequestViews } from '@/lib/requestWorkflow'
 import { sanitizeMultilineText, sanitizeSingleLineText } from '@/lib/sanitization'
 import type { PmacClubRole, PmacExecutiveTitle, PmacSpecialty } from '@/types'
 
-import { PMAC_EVENT_LIST_SELECT, isCoordinatorRole, ensureEventPayload, getPmacEventWhere, getPmacCalendarWhere, getViewerSession, assertPmacActionSession, getActivityActor, findPmacEventForUser, buildWorkspacePermissions, getMissingCoverageRoles, buildWrapUpFilledCount, buildAssignmentTemplateRows, buildAssignmentSuggestions } from './actionShared'
+import { PMAC_EVENT_LIST_SELECT, isCoordinatorRole, ensureEventPayload, getPmacEventWhere, getPmacCalendarWhere, getViewerSession, assertPmacActionSession, getActivityActor, findPmacEventForUser, buildWorkspacePermissions, getMissingCoverageRoles, buildWrapUpFilledCount, buildAssignmentSuggestions } from './actionShared'
 import type { PmacEventDutyRole, PmacAttendanceStatus, PmacEventPayload, StaffingFocusEvent, PmacWrapUpPayload } from './actionShared'
 
 export async function getPmacEvents() {
@@ -390,7 +392,6 @@ export async function getPmacEventWorkspace(eventId: string) {
     },
     roster,
     permissions: buildWorkspacePermissions(session.user, event),
-    assignmentTemplates: buildAssignmentTemplateRows(event.sourceDocumentationType ?? null),
     staffingReadiness: {
       missingRoles: getMissingCoverageRoles(
         event.sourceDocumentationType ?? null,
@@ -725,6 +726,67 @@ export async function rejectPmacEvent(eventId: string, remarks: string) {
   }
 }
 
+export async function acknowledgePmacHandoff(eventId: string) {
+  try {
+    const session = await assertPmacActionSession(['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY'])
+    const sanitizedId = sanitizeSingleLineText(eventId, {
+      fieldName: 'Event ID',
+      maxLength: 191,
+      required: true,
+    })
+
+    const event = await prisma.pmacEvent.findUnique({
+      where: { id: sanitizedId },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        sourceType: true,
+        sourceRequestId: true,
+        handoffAcknowledgedAt: true,
+      },
+    })
+    if (!event || event.sourceType !== 'CMAC_REQUEST' || !event.sourceRequestId) {
+      return { success: false, error: 'CMAC handoff not found.' }
+    }
+    if (event.status !== 'APPROVED') {
+      return { success: false, error: 'Only active CMAC handoffs can be acknowledged.' }
+    }
+    if (event.handoffAcknowledgedAt) return { success: true }
+
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.pmacEvent.updateMany({
+        where: { id: sanitizedId, handoffAcknowledgedAt: null, status: 'APPROVED' },
+        data: {
+          handoffAcknowledgedAt: new Date(),
+          handoffAcknowledgedById: session.user.id,
+        },
+      })
+      if (updated.count !== 1) throw new Error('This handoff was already acknowledged or changed. Refresh and try again.')
+
+      await recordPmacActivity(tx, {
+        entityType: 'EVENT',
+        entityId: sanitizedId,
+        eventId: sanitizedId,
+        ...getActivityActor(session.user),
+        action: 'CMAC_HANDOFF_ACKNOWLEDGED',
+        summary: `Acknowledged the CMAC handoff for "${event.title}".`,
+      })
+      await syncRequestFulfillmentFromPmacEvent(tx, sanitizedId, {
+        id: session.user.id,
+        name: session.user.name,
+        role: session.user.role,
+      })
+    })
+
+    revalidateRequestViews(true)
+    revalidatePmacViews([`/pmac/events/${sanitizedId}`])
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to acknowledge CMAC handoff.' }
+  }
+}
+
 export async function markPmacEventCompleted(eventId: string) {
   try {
     const session = await assertPmacActionSession(['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY'])
@@ -742,7 +804,19 @@ export async function markPmacEventCompleted(eventId: string) {
         status: true,
         startDateTime: true,
         endDateTime: true,
+        sourceType: true,
         sourceDocumentationType: true,
+        handoffAcknowledgedAt: true,
+        assignments: {
+          select: {
+            memberId: true,
+            assignmentRole: true,
+            availabilityResponse: true,
+          },
+        },
+        attendance: {
+          select: { memberId: true },
+        },
       },
     })
 
@@ -754,14 +828,18 @@ export async function markPmacEventCompleted(eventId: string) {
       return { success: false, error: 'Only approved PMAC events can be marked completed.' }
     }
 
+    const completionBlocker = getPmacCompletionBlocker(event)
+    if (completionBlocker) return { success: false, error: completionBlocker }
+
     await prisma.$transaction(async (tx) => {
-      await tx.pmacEvent.update({
-        where: { id: sanitizedId },
+      const completed = await tx.pmacEvent.updateMany({
+        where: { id: sanitizedId, status: 'APPROVED' },
         data: {
           status: 'COMPLETED',
           completedAt: new Date(),
         },
       })
+      if (completed.count !== 1) throw new Error('This event changed while it was being completed. Refresh and try again.')
 
       await recordPmacActivity(tx, {
         entityType: 'EVENT',
@@ -774,8 +852,14 @@ export async function markPmacEventCompleted(eventId: string) {
           status: { before: event.status, after: 'COMPLETED' },
         },
       })
+      await syncRequestFulfillmentFromPmacEvent(tx, sanitizedId, {
+        id: session.user.id,
+        name: session.user.name,
+        role: session.user.role,
+      })
     })
 
+    revalidateRequestViews(true)
     revalidatePmacViews([`/pmac/events/${sanitizedId}`])
     return { success: true }
   } catch (error) {
@@ -847,8 +931,14 @@ export async function savePmacEventWrapUp(eventId: string, payload: PmacWrapUpPa
         summary: 'Updated PMAC event wrap-up notes.',
         details: `Saved post-event notes for "${event.title}".`,
       })
+      await syncRequestFulfillmentFromPmacEvent(tx, sanitizedId, {
+        id: session.user.id,
+        name: session.user.name,
+        role: session.user.role,
+      })
     })
 
+    revalidateRequestViews(true)
     revalidatePmacViews([`/pmac/events/${sanitizedId}`, '/pmac/events', '/pmac/reports'])
     return { success: true }
   } catch (error) {

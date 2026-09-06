@@ -1,4 +1,4 @@
-import { PMAC_OPERATIONAL_ROLES } from '@/lib/pmac'
+import { PMAC_OPERATIONAL_ROLES, PMAC_OVERSIGHT_ROLES } from '@/lib/pmac'
 import { requireRoleAccess } from '@/lib/security'
 
 import PmacPollWorkspaceClient from './PmacPollWorkspaceClient'
@@ -8,7 +8,7 @@ export default async function PmacPollWorkspacePage({
 }: {
   params: Promise<{ pollId: string }>
 }) {
-  await requireRoleAccess(PMAC_OPERATIONAL_ROLES, {
+  await requireRoleAccess([...PMAC_OPERATIONAL_ROLES, ...PMAC_OVERSIGHT_ROLES], {
     nextPath: '/pmac/polls',
   })
 

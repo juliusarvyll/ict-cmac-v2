@@ -30,8 +30,17 @@ export type PmacSpecialty =
   | 'JOURNALISM'
   | 'TECHNICAL_SUPPORT'
   | 'ALL_AROUND'
-export type PmacEventStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'COMPLETED'
+export type PmacEventStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'COMPLETED'
 export type PmacEventSourceType = 'MANUAL' | 'CMAC_REQUEST'
+export type PmacFulfillmentStatus =
+  | 'NOT_APPLICABLE'
+  | 'RELEASED'
+  | 'ACKNOWLEDGED'
+  | 'STAFFING'
+  | 'READY'
+  | 'EVENT_COMPLETED'
+  | 'DELIVERED'
+  | 'CANCELLED'
 export type PmacEventDutyRole = 'PHOTOGRAPHER' | 'VIDEOGRAPHER' | 'JOURNALIST' | 'GRAPHIC_DESIGNER' | 'ALL_AROUND'
 export type PmacAvailabilityStatus = 'PENDING' | 'YES' | 'NO'
 export type PmacAttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED'
@@ -94,6 +103,9 @@ export interface ServiceRequest {
   directorApprovedAt?: string
   deletedAt?: string | null
   archivedAt?: string | null
+  pmacFulfillmentStatus: PmacFulfillmentStatus
+  pmacFulfillmentUpdatedAt?: string | null
+  pmacFulfilledAt?: string | null
   // Relations
   secretaryId: string
   coordinatorId?: string

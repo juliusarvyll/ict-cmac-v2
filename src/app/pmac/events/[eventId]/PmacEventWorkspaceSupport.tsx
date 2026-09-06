@@ -23,7 +23,7 @@ export type AssignmentRow = {
 export type AttendanceRow = {
   memberId: string
   fullName: string
-  status: (typeof PMAC_ATTENDANCE_STATUSES)[number]
+  status: (typeof PMAC_ATTENDANCE_STATUSES)[number] | null
   notes: string
 }
 
@@ -45,14 +45,6 @@ export const EMPTY_WRAP_UP: WrapUpFields = {
   issuesEncountered: '',
   attachmentAuditNotes: '',
   wrapUpNotes: '',
-}
-
-export function buildTemplateRows(roles: readonly AssignmentRow['assignmentRole'][]) {
-  return roles.map((role) => ({
-    memberId: '',
-    assignmentRole: role,
-    assignmentNotes: '',
-  }))
 }
 
 export function getMemberDutyRoles(member?: { specialties?: Array<{ specialty: PmacSpecialty }> | null }) {
@@ -124,15 +116,17 @@ export function buildAttendanceRows(workspace: NonNullable<WorkspaceData>): Atte
   const memberMap = new Map<string, AttendanceRow>()
 
   for (const assignment of workspace.event.assignments) {
+    if (assignment.availabilityResponse !== 'YES') continue
     memberMap.set(assignment.member.id, {
       memberId: assignment.member.id,
       fullName: assignment.member.fullName,
-      status: 'PRESENT',
+      status: null,
       notes: '',
     })
   }
 
   for (const record of workspace.event.attendance) {
+    if (!memberMap.has(record.member.id)) continue
     memberMap.set(record.member.id, {
       memberId: record.member.id,
       fullName: record.member.fullName,

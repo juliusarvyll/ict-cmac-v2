@@ -5,6 +5,7 @@ export const PMAC_EVENT_STATUSES = [
   'PENDING_APPROVAL',
   'APPROVED',
   'REJECTED',
+  'CANCELLED',
   'COMPLETED',
 ] as const
 
@@ -61,6 +62,7 @@ export const PMAC_EVENT_STATUS_LABELS: Record<PmacEventStatus, string> = {
   PENDING_APPROVAL: 'Pending Approval',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
+  CANCELLED: 'Cancelled',
   COMPLETED: 'Completed',
 }
 
@@ -207,8 +209,14 @@ export const PMAC_EVENT_MANAGER_ROLES = ['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECT
 export const PMAC_STAFFING_MANAGER_ROLES = ['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY'] as const satisfies readonly Role[]
 export const PMAC_ATTENDANCE_MANAGER_ROLES = ['PMAC_SECRETARY'] as const satisfies readonly Role[]
 export const PMAC_ASSIGNMENT_RESPONDER_ROLES = ['PMAC_EXECUTIVE', 'PMAC_MEMBER'] as const satisfies readonly Role[]
-export const PMAC_POLL_CREATOR_ROLES = ['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR'] as const satisfies readonly Role[]
-export const PMAC_POLL_MANAGER_ROLES = ['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'CMAC_COORDINATOR'] as const satisfies readonly Role[]
+export const PMAC_POLL_CREATOR_ROLES = [
+  'PMAC_DIRECTOR',
+  'PMAC_ASSISTANT_DIRECTOR',
+  'PMAC_SECRETARY',
+  'PMAC_EXECUTIVE',
+  'CMAC_COORDINATOR',
+] as const satisfies readonly Role[]
+export const PMAC_POLL_MANAGER_ROLES = PMAC_POLL_CREATOR_ROLES
 export const PMAC_POLL_MONITOR_ROLES = ['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY', 'CMAC_COORDINATOR'] as const satisfies readonly Role[]
 export const PMAC_PROJECT_LAUNCHER_ROLES = ['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_SECRETARY'] as const satisfies readonly Role[]
 export const PMAC_POLL_VOTER_ROLES = [
@@ -259,6 +267,10 @@ export function isPmacPollVoterRole(role?: string | null): role is (typeof PMAC_
   return !!role && PMAC_POLL_VOTER_ROLES.includes(role as (typeof PMAC_POLL_VOTER_ROLES)[number])
 }
 
+export function canClosePmacPoll(role: string | null | undefined, userId: string, createdById: string) {
+  return userId === createdById || role === 'PMAC_DIRECTOR' || role === 'PMAC_SECRETARY'
+}
+
 export function isPmacProjectLauncherRole(role?: string | null): role is (typeof PMAC_PROJECT_LAUNCHER_ROLES)[number] {
   return !!role && PMAC_PROJECT_LAUNCHER_ROLES.includes(role as (typeof PMAC_PROJECT_LAUNCHER_ROLES)[number])
 }
@@ -273,6 +285,8 @@ export function getPmacEventStatusBadgeClass(status: PmacEventStatus) {
       return 'bg-emerald-50 text-emerald-700 border-emerald-200'
     case 'REJECTED':
       return 'bg-red-50 text-red-700 border-red-200'
+    case 'CANCELLED':
+      return 'bg-orange-50 text-orange-700 border-orange-200'
     case 'COMPLETED':
       return 'bg-sky-50 text-sky-700 border-sky-200'
   }

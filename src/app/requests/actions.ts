@@ -360,6 +360,7 @@ export async function updateServiceRequest(id: string, formData: RequestInput) {
           ? `/api/request-letters/${normalized.letterAttachmentId}`
           : normalized.letterUrl,
         letterContent: normalized.letterContent,
+        eventDetails: normalized.eventDetails,
         needsSameDayEdit: normalized.needsSameDayEdit,
         needsSameDayPhoto: normalized.needsSameDayPhoto,
       },
@@ -412,6 +413,13 @@ export async function getRequests() {
         secretary: { select: { name: true } },
         coordinator: { select: { name: true } },
         director: { select: { name: true } },
+        pmacEvent: {
+          select: {
+            id: true,
+            status: true,
+            handoffAcknowledgedAt: true,
+          },
+        },
         logs: {
           orderBy: {
             createdAt: 'desc',

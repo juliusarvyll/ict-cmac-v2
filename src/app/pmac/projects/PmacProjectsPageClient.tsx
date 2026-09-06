@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { CalendarDays, ExternalLink, FolderKanban, Link as LinkIcon, Plus, RefreshCw, Search, Users } from 'lucide-react'
 
@@ -78,6 +79,8 @@ function healthClass(tone: string) {
 }
 
 export default function PmacProjectsPageClient() {
+  const searchParams = useSearchParams()
+  const selectedProjectId = searchParams.get('projectId')
   const [board, setBoard] = useState<ProjectBoard | null>(null)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -100,6 +103,15 @@ export default function PmacProjectsPageClient() {
   useEffect(() => {
     loadProjects()
   }, [])
+
+  useEffect(() => {
+    if (loading || !selectedProjectId) return
+
+    document.getElementById(`project-${selectedProjectId}`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }, [loading, selectedProjectId])
 
   function submitProject() {
     setMessage('')
@@ -380,7 +392,11 @@ export default function PmacProjectsPageClient() {
           const canChangeProjectStatus = project.canManageProject && (project.status !== 'COMPLETED' || project.canCloseProject)
           const needsMemberSelection = project.mustSelectProjectMembers && selectedTeamMemberIds.length < 2
           return (
-            <div key={project.id} className="card p-6">
+            <div
+              key={project.id}
+              id={`project-${project.id}`}
+              className={`card scroll-mt-24 p-6 ${selectedProjectId === project.id ? 'ring-2 ring-emerald-400 ring-offset-2' : ''}`}
+            >
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <div className="flex flex-wrap gap-2">
@@ -685,22 +701,33 @@ export default function PmacProjectsPageClient() {
                 ) : null}
               </div>
 
-              {project.canCloseProject && project.status !== 'COMPLETED' ? (
+              {project.isAssignedHead && project.status !== 'COMPLETED' ? (
                 <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/60 p-4">
-                  <p className="text-sm font-bold text-slate-800">Submit Project Output</p>
+                  <p className="text-sm font-bold text-slate-800">Project Closure</p>
+                  <div className="mt-3 grid gap-2 text-xs font-semibold sm:grid-cols-3">
+                    <span className={project.allMilestonesComplete ? 'text-emerald-700' : 'text-amber-700'}>
+                      {project.allMilestonesComplete ? '✓' : '○'} Milestones complete
+                    </span>
+                    <span className={project.canCloseProject ? 'text-emerald-700' : 'text-amber-700'}>
+                      {project.canCloseProject ? '✓' : '○'} Director review current
+                    </span>
+                    <span className={(outputForms[project.id] ?? project.outputSummary ?? '').trim() ? 'text-emerald-700' : 'text-amber-700'}>
+                      {(outputForms[project.id] ?? project.outputSummary ?? '').trim() ? '✓' : '○'} Output summary supplied
+                    </span>
+                  </div>
                   <textarea
-                    value={outputForms[project.id] ?? ''}
+                    value={outputForms[project.id] ?? project.outputSummary ?? ''}
                     onChange={event => setOutputForms(previous => ({ ...previous, [project.id]: event.target.value }))}
                     placeholder="Describe the completed output, final links, deliverables, or turnover notes"
                     className="mt-3 min-h-24 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-200"
                   />
                   <button
                     type="button"
-                    disabled={isPending}
+                    disabled={isPending || !project.canCloseProject || !project.allMilestonesComplete || !(outputForms[project.id] ?? project.outputSummary ?? '').trim()}
                     onClick={() => submitOutput(project.id)}
                     className="mt-3 rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
                   >
-                    Submit Output & Complete
+                    Submit Output and Close Project
                   </button>
                 </div>
               ) : null}

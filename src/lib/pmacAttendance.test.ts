@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { getPmacAttendanceRecordKey, validatePmacAttendanceSubmission } from './pmacAttendance'
+import { getPmacAttendanceRecordKey, validatePmacAttendanceEvent, validatePmacAttendanceSubmission } from './pmacAttendance'
 
 const record = { eventId: 'event-1', memberId: 'member-1' }
 
@@ -19,6 +19,23 @@ describe('PMAC attendance submission validation', () => {
   })
 
   it('rejects members who are not assigned to the event', () => {
-    expect(validatePmacAttendanceSubmission([record], new Set())).toMatch(/members assigned/i)
+    expect(validatePmacAttendanceSubmission([record], new Set())).toMatch(/confirmed their event assignment/i)
+  })
+
+  it('only opens attendance for approved events that have started', () => {
+    const now = new Date('2026-08-12T10:00:00.000Z')
+
+    expect(validatePmacAttendanceEvent({
+      status: 'APPROVED',
+      startDateTime: new Date('2026-08-12T09:00:00.000Z'),
+    }, now)).toBeNull()
+    expect(validatePmacAttendanceEvent({
+      status: 'DRAFT',
+      startDateTime: new Date('2026-08-12T09:00:00.000Z'),
+    }, now)).toMatch(/approved or completed/i)
+    expect(validatePmacAttendanceEvent({
+      status: 'APPROVED',
+      startDateTime: new Date('2026-08-12T11:00:00.000Z'),
+    }, now)).toMatch(/after the event begins/i)
   })
 })

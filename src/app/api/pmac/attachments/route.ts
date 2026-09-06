@@ -10,6 +10,7 @@ import {
   scanUploadedFile,
 } from '@/lib/malwareScan'
 import { recordPmacActivity } from '@/lib/pmacActivity'
+import { PMAC_POLL_MANAGER_ROLES } from '@/lib/pmac'
 import { prisma } from '@/lib/prisma'
 import { assertActionAccess, assertSameOriginMutation } from '@/lib/security'
 import { sanitizeMultilineText, sanitizeSingleLineText } from '@/lib/sanitization'
@@ -108,7 +109,7 @@ async function ensureAttachmentAccess(
       throw new Error('PMAC poll not found.')
     }
 
-    if (!['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR'].includes(role)) {
+    if (!PMAC_POLL_MANAGER_ROLES.includes(role as (typeof PMAC_POLL_MANAGER_ROLES)[number])) {
       throw new Error('Unauthorized')
     }
 
@@ -144,7 +145,7 @@ async function removeStoredFile(filePath: string) {
 export async function POST(request: NextRequest) {
   try {
     assertSameOriginMutation(request)
-    const session = await assertActionAccess(['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY'], {
+    const session = await assertActionAccess([...PMAC_POLL_MANAGER_ROLES], {
     })
     const formData = await request.formData()
 
@@ -270,7 +271,7 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     assertSameOriginMutation(request)
-    const session = await assertActionAccess(['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY'], {
+    const session = await assertActionAccess([...PMAC_POLL_MANAGER_ROLES], {
       zeroTrust: true,
     })
     const body = await request.json()
@@ -300,7 +301,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
-    if (attachment.pollId && !['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR'].includes(session.user.role)) {
+    if (attachment.pollId && !PMAC_POLL_MANAGER_ROLES.includes(session.user.role as (typeof PMAC_POLL_MANAGER_ROLES)[number])) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 

@@ -1,8 +1,9 @@
-import type { Prisma, RequestStatus } from '@prisma/client'
+import type { PmacEventDutyRole, Prisma, RequestStatus } from '@prisma/client'
 import type { Session } from 'next-auth'
 
 import {
   PMAC_EXECUTIVE_TITLE_LABELS,
+  PMAC_EVENT_DUTY_ROLE_LABELS,
   PMAC_PROJECT_STATUS_LABELS,
   getRecommendedAssignmentRoles,
   isPmacAttendanceManagerRole,
@@ -17,6 +18,40 @@ import type { AppNotification } from '@/types/notifications'
 
 type SessionUser = Session['user']
 type NotificationPriority = AppNotification['priority']
+
+export function getPmacProjectNotificationHref(projectId: string) {
+  return `/pmac/projects?projectId=${encodeURIComponent(projectId)}`
+}
+
+export function getPmacAssignmentResponseNotificationCopy(input: {
+  memberName: string
+  eventTitle: string
+  assignmentRole: PmacEventDutyRole
+  response: 'YES' | 'NO'
+}) {
+  const accepted = input.response === 'YES'
+  const duty = PMAC_EVENT_DUTY_ROLE_LABELS[input.assignmentRole]
+
+  return {
+    accepted,
+    title: accepted ? `${input.memberName} accepted coverage` : `${input.memberName} declined coverage`,
+    description: `${input.memberName} answered ${accepted ? 'Yes' : 'No'} for the ${duty} assignment in "${input.eventTitle}".`,
+    dueLabel: accepted ? 'Accepted' : 'Needs replacement',
+  }
+}
+
+export function getPmacAttendanceGapNotificationCopy(input: {
+  eventTitle: string
+  missingCount: number
+  confirmedCount: number
+  completed: boolean
+}) {
+  return {
+    title: input.completed ? 'Completed event has missing attendance' : 'Event attendance needs recording',
+    description: `"${input.eventTitle}" is missing attendance for ${input.missingCount} of ${input.confirmedCount} confirmed member(s).`,
+    dueLabel: `${input.missingCount} missing`,
+  }
+}
 
 function getPriorityWeight(priority: NotificationPriority) {
   switch (priority) {
@@ -56,7 +91,7 @@ export function buildCoreNotificationWhere(user: SessionUser): Prisma.AuditLogWh
     return {
       OR: [
         {
-          action: { in: ['COORDINATOR_APPROVED', 'DIRECTOR_APPROVED', 'REVISION_REQUESTED', 'REJECTED', 'CANCELLED'] },
+          action: { in: ['COORDINATOR_APPROVED', 'DIRECTOR_APPROVED', 'REVISION_REQUESTED', 'REJECTED', 'CANCELLED', 'PMAC_FULFILLMENT_UPDATED'] },
           request: {
             is: {
               deletedAt: null,
@@ -107,19 +142,41 @@ export function buildCoreNotificationWhere(user: SessionUser): Prisma.AuditLogWh
             },
           },
         },
+        {
+          action: 'PMAC_FULFILLMENT_UPDATED',
+          request: {
+            is: {
+              deletedAt: null,
+              serviceType: 'PMAC',
+            },
+          },
+        },
       ],
     }
   }
 
   if (user.role === 'ICT_DIRECTOR') {
     return {
-      action: 'COORDINATOR_APPROVED',
-      request: {
-        is: {
-          deletedAt: null,
-          status: 'COORDINATOR_APPROVED',
+      OR: [
+        {
+          action: 'COORDINATOR_APPROVED',
+          request: {
+            is: {
+              deletedAt: null,
+              status: 'COORDINATOR_APPROVED',
+            },
+          },
         },
-      },
+        {
+          action: 'PMAC_FULFILLMENT_UPDATED',
+          request: {
+            is: {
+              deletedAt: null,
+              serviceType: 'PMAC',
+            },
+          },
+        },
+      ],
     }
   }
 
@@ -133,6 +190,7 @@ function formatCoreNotification(
   log: {
     id: string
     action: string
+    details: string | null
     createdAt: Date
     request: {
       id: string
@@ -146,6 +204,33 @@ function formatCoreNotification(
   const isOwnRequest = log.request.secretaryId === user.id
   const dueLabel = log.request.eventDate && isToday(log.request.eventDate) ? 'Event day' : null
   const requestHref = `/requests?requestId=${encodeURIComponent(log.request.id)}`
+
+  if (log.action === 'PMAC_FULFILLMENT_UPDATED') {
+    const fulfillment = log.details?.match(/\bto ([A-Z_]+)\b/)?.[1] ?? 'UPDATED'
+    const labels: Record<string, string> = {
+      ACKNOWLEDGED: 'acknowledged by PMAC',
+      STAFFING: 'being staffed by PMAC',
+      READY: 'coverage ready',
+      EVENT_COMPLETED: 'event coverage completed',
+      DELIVERED: 'outputs delivered',
+      CANCELLED: 'PMAC work cancelled',
+    }
+    const label = labels[fulfillment] ?? 'updated by PMAC'
+    const isProblem = fulfillment === 'CANCELLED'
+    const needsAttention = fulfillment === 'STAFFING'
+
+    return buildNotification({
+      id: `core-pmac-fulfillment-${log.id}`,
+      title: `PMAC fulfillment: ${label}`,
+      description: `"${log.request.eventTitle}" is ${label}.`,
+      tone: isProblem ? 'danger' : needsAttention ? 'warning' : 'success',
+      priority: isProblem ? 'critical' : fulfillment === 'DELIVERED' ? 'high' : 'medium',
+      createdAt: log.createdAt.toISOString(),
+      href: requestHref,
+      module: 'CORE',
+      dueLabel: fulfillment === 'DELIVERED' ? 'Delivered' : null,
+    })
+  }
 
   if (user.role === 'SECRETARY') {
     if (!isOwnRequest) {
@@ -292,6 +377,7 @@ async function getCoreNotificationFeed(user: SessionUser, limit: number) {
     select: {
       id: true,
       action: true,
+      details: true,
       createdAt: true,
       request: {
         select: {
@@ -342,11 +428,12 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
 
   const now = new Date()
   const soon = new Date(now.getTime() + (1000 * 60 * 60 * 48))
+  const staffingSoon = new Date(now.getTime() + (1000 * 60 * 60 * 24 * 14))
   const recent = new Date(now.getTime() - (1000 * 60 * 60 * 24 * 7))
   const projectWhere = getPmacProjectNotificationWhere(user)
   const activityWhere = buildPmacActivityNotificationWhere(user, new Date(now.getTime() - (1000 * 60 * 60 * 24)))
 
-  const [pendingEvents, assignments, polls, activity, staffingEvents, attendanceGaps, projectActivity] = await Promise.all([
+  const [pendingEvents, assignments, assignmentResponses, polls, activity, staffingEvents, attendanceGaps, projectActivity] = await Promise.all([
     user.role === 'CMAC_COORDINATOR'
       ? prisma.pmacEvent.findMany({
           where: {
@@ -372,12 +459,12 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
               status: 'APPROVED',
               startDateTime: {
                 gte: now,
-                lte: soon,
               },
             },
           },
           select: {
             id: true,
+            createdAt: true,
             event: {
               select: {
                 id: true,
@@ -391,7 +478,32 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
               startDateTime: 'asc',
             },
           },
-          take: 2,
+          take: 8,
+        })
+      : Promise.resolve([]),
+    user.role === 'PMAC_SECRETARY'
+      ? prisma.pmacEventAssignment.findMany({
+          where: {
+            availabilityResponse: { in: ['YES', 'NO'] },
+            respondedAt: { gte: recent },
+          },
+          select: {
+            id: true,
+            assignmentRole: true,
+            availabilityResponse: true,
+            respondedAt: true,
+            member: {
+              select: { fullName: true },
+            },
+            event: {
+              select: {
+                id: true,
+                title: true,
+              },
+            },
+          },
+          orderBy: { respondedAt: 'desc' },
+          take: 8,
         })
       : Promise.resolve([]),
     isPmacSystemRole(user.role)
@@ -423,7 +535,9 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
       : Promise.resolve([]),
     activityWhere
       ? prisma.pmacActivityLog.findMany({
-          where: activityWhere,
+          where: user.role === 'PMAC_SECRETARY'
+            ? { AND: [activityWhere, { action: { not: 'ASSIGNMENT_RESPONSE_SUBMITTED' } }] }
+            : activityWhere,
           select: {
             id: true,
             summary: true,
@@ -443,15 +557,23 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
             status: 'APPROVED',
             startDateTime: {
               gte: now,
-              lte: soon,
             },
+            OR: [
+              {
+                sourceType: 'CMAC_REQUEST',
+                assignments: { none: {} },
+              },
+              { startDateTime: { lte: staffingSoon } },
+            ],
           },
           select: {
             id: true,
             title: true,
             startDateTime: true,
+            createdAt: true,
             sourceType: true,
             sourceDocumentationType: true,
+            handoffAcknowledgedAt: true,
             assignments: {
               select: {
                 assignmentRole: true,
@@ -462,36 +584,49 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
           orderBy: {
             startDateTime: 'asc',
           },
-          take: 4,
+          take: 8,
         })
       : Promise.resolve([]),
     isPmacAttendanceManagerRole(user.role) || isPmacEventManagerRole(user.role)
       ? prisma.pmacEvent.findMany({
           where: {
-            status: 'COMPLETED',
-            completedAt: {
+            status: {
+              in: ['APPROVED', 'COMPLETED'],
+            },
+            startDateTime: {
               gte: recent,
+              lte: now,
+            },
+            assignments: {
+              some: {
+                availabilityResponse: 'YES',
+              },
             },
           },
           select: {
             id: true,
             title: true,
+            status: true,
+            startDateTime: true,
             completedAt: true,
             attendance: {
               select: {
-                id: true,
+                memberId: true,
               },
             },
             assignments: {
+              where: {
+                availabilityResponse: 'YES',
+              },
               select: {
-                id: true,
+                memberId: true,
               },
             },
           },
           orderBy: {
-            completedAt: 'desc',
+            startDateTime: 'desc',
           },
-          take: 2,
+          take: 8,
         })
       : Promise.resolve([]),
     projectWhere
@@ -530,31 +665,39 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
   ])
 
   const staffingNotifications = staffingEvents.flatMap((event) => {
-    const assignedRoles = new Set(event.assignments.map((assignment) => assignment.assignmentRole))
+    const confirmedRoles = new Set(
+      event.assignments
+        .filter((assignment) => assignment.availabilityResponse === 'YES')
+        .map((assignment) => assignment.assignmentRole),
+    )
     const pendingAssignmentResponses = event.assignments.filter((assignment) => assignment.availabilityResponse === 'PENDING').length
     const missingRoles = event.sourceDocumentationType
-      ? getRecommendedAssignmentRoles(event.sourceDocumentationType).filter((role) => !assignedRoles.has(role))
+      ? getRecommendedAssignmentRoles(event.sourceDocumentationType).filter((role) => !confirmedRoles.has(role))
       : []
 
     const reminders: AppNotification[] = []
 
     if (event.sourceType === 'CMAC_REQUEST' && event.assignments.length === 0) {
       reminders.push(buildNotification({
-        id: `pmac-imported-${event.id}`,
-        title: 'New CMAC-approved PMAC event needs staffing',
-        description: `"${event.title}" was assigned to PMAC and still has no member assignments.`,
+        id: `pmac-imported-${event.id}-${event.handoffAcknowledgedAt ? 'acknowledged' : 'released'}`,
+        title: event.handoffAcknowledgedAt ? 'CMAC-approved PMAC event needs staffing' : 'New CMAC handoff needs acknowledgment',
+        description: event.handoffAcknowledgedAt
+          ? `"${event.title}" was assigned to PMAC and still has no member assignments.`
+          : `"${event.title}" was released by CMAC. Acknowledge it before assigning the coverage team.`,
         tone: 'warning',
         priority: 'critical',
-        createdAt: event.startDateTime.toISOString(),
+        createdAt: event.createdAt.toISOString(),
         href: `/pmac/events/${event.id}`,
         module: 'PMAC',
-        dueLabel: isToday(event.startDateTime) ? 'Event day' : 'Staffing overdue',
+        dueLabel: event.handoffAcknowledgedAt
+          ? (isToday(event.startDateTime) ? 'Event day' : 'Staffing required')
+          : 'Awaiting acknowledgment',
       }))
     }
 
     if (missingRoles.length || pendingAssignmentResponses > 0) {
       reminders.push(buildNotification({
-        id: `pmac-staffing-${event.id}`,
+        id: `pmac-staffing-${event.id}-${missingRoles.slice().sort().join('-') || 'covered'}-${pendingAssignmentResponses}`,
         title: 'Upcoming PMAC event is not staffing-ready',
         description: missingRoles.length
           ? `"${event.title}" is still missing ${missingRoles.join(', ')} coverage.`
@@ -571,19 +714,35 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
     return reminders
   })
 
-  const attendanceNotifications = attendanceGaps
-    .filter((event) => event.assignments.length > 0 && event.attendance.length === 0)
-    .map((event) => buildNotification({
-      id: `pmac-attendance-gap-${event.id}`,
-      title: 'Attendance still needs recording',
-      description: `"${event.title}" has completed but no attendance has been logged yet.`,
-      tone: 'info' as const,
-      priority: 'high',
-      createdAt: (event.completedAt ?? now).toISOString(),
+  const attendanceNotifications = attendanceGaps.flatMap((event) => {
+    const confirmedMemberIds = new Set(event.assignments.map(assignment => assignment.memberId))
+    const recordedMemberIds = new Set(
+      event.attendance
+        .filter(record => confirmedMemberIds.has(record.memberId))
+        .map(record => record.memberId),
+    )
+    const missingCount = confirmedMemberIds.size - recordedMemberIds.size
+    if (missingCount <= 0) return []
+
+    const copy = getPmacAttendanceGapNotificationCopy({
+      eventTitle: event.title,
+      missingCount,
+      confirmedCount: confirmedMemberIds.size,
+      completed: event.status === 'COMPLETED',
+    })
+
+    return [buildNotification({
+      id: `pmac-attendance-gap-${event.id}-${missingCount}`,
+      title: copy.title,
+      description: copy.description,
+      tone: event.status === 'COMPLETED' ? 'warning' as const : 'info' as const,
+      priority: event.status === 'COMPLETED' ? 'high' : 'medium',
+      createdAt: (event.completedAt ?? event.startDateTime).toISOString(),
       href: `/pmac/events/${event.id}`,
       module: 'PMAC' as const,
-      dueLabel: 'Needs recording',
-    }))
+      dueLabel: copy.dueLabel,
+    })]
+  })
 
   const notifications: AppNotification[] = [
     ...pendingEvents.map((event) => buildNotification({
@@ -600,14 +759,35 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
     ...assignments.map((assignment) => buildNotification({
       id: `pmac-assignment-${assignment.id}`,
       title: 'PMAC assignment needs response',
-      description: `"${assignment.event.title}" is coming up soon. Confirm your availability.`,
+      description: `"${assignment.event.title}" requires your coverage response. Confirm your availability.`,
       tone: 'warning' as const,
       priority: 'high',
-      createdAt: assignment.event.startDateTime.toISOString(),
+      createdAt: assignment.createdAt.toISOString(),
       href: `/pmac/events/${assignment.event.id}`,
       module: 'PMAC' as const,
       dueLabel: isToday(assignment.event.startDateTime) ? 'Today' : 'Awaiting response',
     })),
+    ...assignmentResponses.map((assignment) => {
+      const memberName = assignment.member.fullName
+      const copy = getPmacAssignmentResponseNotificationCopy({
+        memberName,
+        eventTitle: assignment.event.title,
+        assignmentRole: assignment.assignmentRole,
+        response: assignment.availabilityResponse as 'YES' | 'NO',
+      })
+
+      return buildNotification({
+        id: `pmac-assignment-response-${assignment.id}-${assignment.availabilityResponse}`,
+        title: copy.title,
+        description: copy.description,
+        tone: copy.accepted ? 'success' as const : 'warning' as const,
+        priority: copy.accepted ? 'medium' as const : 'high' as const,
+        createdAt: (assignment.respondedAt ?? now).toISOString(),
+        href: `/pmac/events/${assignment.event.id}`,
+        module: 'PMAC' as const,
+        dueLabel: copy.dueLabel,
+      })
+    }),
     ...polls.map((poll) => buildNotification({
       id: `pmac-poll-${poll.id}`,
       title: 'Open PMAC poll awaiting your vote',
@@ -638,7 +818,7 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
       module: 'PMAC' as const,
     })),
     ...projectActivity.flatMap((entry) => {
-      if (!entry.project) {
+      if (!entry.project || !entry.projectId) {
         return []
       }
 
@@ -654,7 +834,7 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
             : 'info' as const,
         priority: project.status === 'ON_HOLD' ? 'high' : 'medium',
         createdAt: entry.createdAt.toISOString(),
-        href: '/pmac/projects',
+        href: getPmacProjectNotificationHref(entry.projectId),
         module: 'PMAC' as const,
         dueLabel: `${PMAC_EXECUTIVE_TITLE_LABELS[project.branch]} · ${PMAC_PROJECT_STATUS_LABELS[project.status]}`,
       })]
@@ -751,13 +931,17 @@ export async function markNotificationsRead(userId: string, notifications: Array
 }
 
 export async function getNotificationFeed(user: SessionUser, limit = 8): Promise<AppNotification[]> {
+  const candidateLimit = Math.max(limit * 3, limit)
   const [coreNotifications, pmacNotifications] = await Promise.all([
-    isCoreWorkflowRole(user.role) ? getCoreNotificationFeed(user, limit) : Promise.resolve([]),
-    (isPmacSystemRole(user.role) || user.role === 'CMAC_COORDINATOR') ? getPmacNotificationFeed(user, limit) : Promise.resolve([]),
+    isCoreWorkflowRole(user.role) ? getCoreNotificationFeed(user, candidateLimit) : Promise.resolve([]),
+    (isPmacSystemRole(user.role) || user.role === 'CMAC_COORDINATOR') ? getPmacNotificationFeed(user, candidateLimit) : Promise.resolve([]),
   ])
 
-  const ranked = [...coreNotifications, ...pmacNotifications]
+  const candidates = await applyReadState(user.id, [...coreNotifications, ...pmacNotifications])
+  return candidates
     .sort((left, right) => {
+      if (left.isRead !== right.isRead) return left.isRead ? 1 : -1
+
       const priorityDelta = getPriorityWeight(right.priority) - getPriorityWeight(left.priority)
       if (priorityDelta !== 0) {
         return priorityDelta
@@ -766,6 +950,4 @@ export async function getNotificationFeed(user: SessionUser, limit = 8): Promise
       return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
     })
     .slice(0, limit)
-
-  return applyReadState(user.id, ranked)
 }

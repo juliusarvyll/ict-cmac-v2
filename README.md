@@ -116,6 +116,12 @@ It also starts the official ClamAV service and waits for its virus definitions a
 The container also runs `prisma db push` before starting Next.js so the schema stays in sync with the configured database.
 The container keeps the same runtime contract as the non-Docker app: `DATABASE_URL`, `NEXTAUTH_SECRET`, and `NEXTAUTH_URL` must be provided. `docker compose` loads them from `.env`, and the entrypoint fails fast if any required value is missing.
 
+After deploying the CMAC-to-PMAC fulfillment workflow for the first time, reconcile existing approved PMAC requests once:
+
+```bash
+npm run backfill:pmac-handoffs
+```
+
 Vercel uses the build command in `vercel.json` to apply additive Prisma schema updates before creating the Next.js build. Ensure `DATABASE_URL` is configured for every Vercel environment that can deploy this application.
 
 ### Malware scanner deployment

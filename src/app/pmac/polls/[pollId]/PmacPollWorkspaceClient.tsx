@@ -21,7 +21,6 @@ import {
   PMAC_VOTE_CHOICE_LABELS,
 } from '@/lib/pmac'
 import { runWithReverification } from '@/lib/reverificationClient'
-import { PMAC_CLUB_ROLE_LABELS } from '@/lib/roles'
 
 type WorkspaceData = Awaited<ReturnType<typeof getPmacPollWorkspace>>
 
@@ -209,7 +208,7 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
         <div>
           <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">PMAC Governance</p>
           <h2 className="mt-2 font-display text-3xl font-bold text-slate-800">{poll.title}</h2>
-          <p className="mt-2 text-sm text-slate-500">Internal PMAC poll workspace for publishing decisions, collecting votes, and monitoring participation.</p>
+          <p className="mt-2 text-sm text-slate-500">Review the decision, vote, or manage its status.</p>
         </div>
         <Link
           href="/pmac/polls"
@@ -222,32 +221,29 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
 
       <div className="card overflow-hidden">
         <div
-          className="px-6 py-7 text-white"
+          className="px-6 py-5 text-white"
           style={{ background: 'var(--hero-gradient)' }}
         >
-          <div className="flex flex-wrap items-start justify-between gap-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <PmacPollStatusBadge status={poll.status} />
                 <PmacPollTypeBadge type={poll.type} />
               </div>
-              <p className="text-sm text-emerald-100">Results: {PMAC_POLL_RESULTS_VISIBILITY_LABELS[poll.resultsVisibility as keyof typeof PMAC_POLL_RESULTS_VISIBILITY_LABELS]}</p>
               <p className="text-sm text-emerald-100">
                 {formatDateTime(poll.opensAt)} to {formatDateTime(poll.closesAt)}
               </p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4 text-sm backdrop-blur-sm">
-              <p>Created by: {poll.createdBy.name || 'Unknown'}</p>
-              <p className="mt-1">Eligible voters: {metrics.totalEligibleVoters}</p>
-              <p className="mt-1">Votes cast: {metrics.totalVotesCast}</p>
+            <div className="text-right text-sm text-emerald-100">
+              <p>{metrics.totalVotesCast} of {metrics.totalEligibleVoters} voted</p>
+              <p className="mt-1 text-xs opacity-80">Created by {poll.createdBy.name || 'Unknown'}</p>
             </div>
           </div>
         </div>
 
         <div className="grid gap-4 px-6 py-5 md:grid-cols-3">
           <div className="rounded-2xl bg-slate-50 px-4 py-4 md:col-span-2">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Description</p>
-            <p className="mt-3 text-sm leading-6 text-slate-600">{poll.description || 'No poll description yet.'}</p>
+            <p className="text-sm leading-6 text-slate-600">{poll.description || 'No description provided.'}</p>
           </div>
           <div className="rounded-2xl bg-slate-50 px-4 py-4">
             <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Participation</p>
@@ -296,7 +292,6 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
             <div className="card p-6 space-y-4">
               <div className="space-y-1">
                 <h3 className="font-display text-xl font-bold text-slate-800">Poll Actions</h3>
-                <p className="text-sm text-slate-500">Manage the voting lifecycle as this poll moves from draft to published governance record.</p>
               </div>
 
               <div className="flex flex-wrap gap-3">
@@ -370,7 +365,7 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
             <div className="card p-6 space-y-4">
               <div className="space-y-1">
                 <h3 className="font-display text-xl font-bold text-slate-800">Voting</h3>
-                <p className="text-sm text-slate-500">Each eligible PMAC user can submit only one vote for this poll.</p>
+                <p className="text-sm text-slate-500">Choose one response. Votes cannot be changed.</p>
               </div>
 
               {viewerVote ? (
@@ -401,10 +396,9 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
                           await refreshWorkspace()
                         })
                       }}
-                      className="rounded-2xl border border-slate-200 bg-white px-4 py-5 text-left transition-colors hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-60"
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-4 text-center transition-colors hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-60"
                     >
                       <p className="text-sm font-semibold text-slate-800">{PMAC_VOTE_CHOICE_LABELS[choice]}</p>
-                      <p className="mt-2 text-xs text-slate-500">Submit your one allowed vote for this PMAC poll.</p>
                     </button>
                   ))}
                 </div>
@@ -416,27 +410,24 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
             </div>
           ) : null}
 
-          <div className="card p-6 space-y-4">
+          {poll.linkedEvent ? <div className="card p-6 space-y-4">
             <div className="space-y-1">
               <h3 className="font-display text-xl font-bold text-slate-800">Linked Context</h3>
               <p className="text-sm text-slate-500">Keep governance decisions connected to PMAC operations when needed.</p>
             </div>
 
-            {poll.linkedEvent ? (
               <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
                 <p className="text-sm font-semibold text-slate-800">{poll.linkedEvent.title}</p>
                 <p className="mt-1 text-xs text-slate-400">{poll.linkedEvent.status} - {formatDateTime(poll.linkedEvent.startDateTime)}</p>
               </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
-                This poll is not linked to a PMAC event.
-              </div>
-            )}
-          </div>
+          </div> : null}
 
-          <div className="card p-6 space-y-4">
+          {(canManageAttachments || poll.attachments.length > 0) ? <details className="card p-6 group">
+            <summary className="cursor-pointer list-none font-display text-lg font-bold text-slate-800">
+              Attachments <span className="ml-2 text-sm font-normal text-slate-400">({poll.attachments.length})</span>
+            </summary>
+            <div className="mt-5 space-y-4">
             <div className="space-y-1">
-              <h3 className="font-display text-xl font-bold text-slate-800">Attachments</h3>
               <p className="text-sm text-slate-500">Attach poll references, approval materials, or supporting PMAC governance files.</p>
             </div>
 
@@ -502,7 +493,8 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
                 No PMAC poll attachments have been added yet.
               </div>
             )}
-          </div>
+            </div>
+          </details> : null}
         </div>
 
         <div className="space-y-6">
@@ -540,38 +532,13 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
             )}
           </div>
 
-          {metrics.resultsVisible && poll.votes.length ? (
-            <div className="card p-6 space-y-4">
-              <div className="space-y-1">
-                <h3 className="font-display text-xl font-bold text-slate-800">Voter Log</h3>
-                <p className="text-sm text-slate-500">Participation visibility for PMAC governance tracking.</p>
-              </div>
-
-              <div className="space-y-3">
-                {poll.votes.map((vote) => (
-                  <div key={vote.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">{vote.voterMember.fullName}</p>
-                        <p className="mt-1 text-xs text-slate-400">{PMAC_CLUB_ROLE_LABELS[vote.voterMember.clubRole as keyof typeof PMAC_CLUB_ROLE_LABELS]}</p>
-                      </div>
-                      <PmacVoteChoiceBadge choice={vote.selectedOption} />
-                    </div>
-                    <p className="mt-2 text-xs text-slate-400">Submitted on {formatDateTime(vote.votedAt)}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="card p-6 space-y-4">
-            <div className="space-y-1">
-              <h3 className="font-display text-xl font-bold text-slate-800">Activity History</h3>
-              <p className="text-sm text-slate-500">Recent governance actions recorded for this PMAC poll.</p>
-            </div>
+          <details className="card p-6 group">
+            <summary className="cursor-pointer list-none font-display text-lg font-bold text-slate-800">
+              Activity <span className="ml-2 text-sm font-normal text-slate-400">({poll.activityLogs.length})</span>
+            </summary>
 
             {poll.activityLogs.length ? (
-              <div className="space-y-3">
+              <div className="mt-5 space-y-3">
                 {poll.activityLogs.map((entry) => (
                   <div key={entry.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -592,7 +559,7 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
                 No PMAC activity entries have been recorded for this poll yet.
               </div>
             )}
-          </div>
+          </details>
         </div>
       </div>
     </div>

@@ -265,7 +265,12 @@ export async function buildPmacReportAnalytics(filters: PmacReportFilters = {}):
     hasPmacV4Delegates()
       ? prisma.pmacProject.groupBy({
           by: ['branch', 'status'],
-          where: projectWhere,
+          where: {
+            AND: [
+              projectWhere,
+              { status: { not: 'ARCHIVED' } },
+            ],
+          },
           _count: { _all: true },
         })
       : Promise.resolve([]),
@@ -287,7 +292,14 @@ export async function buildPmacReportAnalytics(filters: PmacReportFilters = {}):
           where: {
             status: { not: 'DONE' },
             dueDate: { lt: now },
-            project: { is: projectWhere },
+            project: {
+              is: {
+                AND: [
+                  projectWhere,
+                  { status: { in: ['PLANNED', 'ACTIVE', 'ON_HOLD'] } },
+                ],
+              },
+            },
           },
           orderBy: { dueDate: 'asc' },
           take: 20,

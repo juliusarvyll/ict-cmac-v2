@@ -37,6 +37,7 @@ export async function getEditableServiceRequest(id: string) {
       documentationType: true,
       letterUrl: true,
       letterContent: true,
+      eventDetails: true,
       needsSameDayEdit: true,
       needsSameDayPhoto: true,
       campusType: true,
@@ -62,6 +63,7 @@ export async function createServiceRequest(formData: {
   letterUrl?: string | null
   letterAttachmentId?: string | null
   letterContent?: string | null
+  eventDetails?: string | null
   needsSameDayEdit?: boolean
   needsSameDayPhoto?: boolean
   campusType?: 'IN_CAMPUS' | 'OFF_CAMPUS'
@@ -124,6 +126,7 @@ export async function createServiceRequest(formData: {
             ? `/api/request-letters/${normalized.letterAttachmentId}`
             : normalized.letterUrl,
           letterContent: normalized.letterContent,
+          eventDetails: normalized.eventDetails,
           needsSameDayEdit: normalized.needsSameDayEdit,
           needsSameDayPhoto: normalized.needsSameDayPhoto,
           campusType: normalized.campusType,

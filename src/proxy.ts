@@ -2,6 +2,7 @@ import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 
 import { getHomePathForRole, isCoreWorkflowRole, isPmacSystemRole } from "@/lib/roles";
+import { canCoordinatorAccessPmacPath } from "@/lib/pmacRouteAccess";
 
 export default withAuth(
   async function middleware(req) {
@@ -40,7 +41,10 @@ export default withAuth(
       return NextResponse.redirect(new URL(homePath, req.url));
     }
 
-    if (path.startsWith("/pmac/projects") && role === "CMAC_COORDINATOR") {
+    if (
+      role === "CMAC_COORDINATOR"
+      && canCoordinatorAccessPmacPath(path)
+    ) {
       return NextResponse.next();
     }
 

@@ -4,9 +4,11 @@ import type { Prisma } from '@prisma/client'
 import { unstable_noStore as noStore } from 'next/cache'
 import { getDutyRolesForSpecialties, getRecommendedAssignmentRoles, isPmacAttendanceManagerRole, isPmacStaffingManagerRole, PMAC_ATTENDANCE_STATUSES, PMAC_EVENT_DUTY_ROLES } from '@/lib/pmac'
 import { recordPmacActivity } from '@/lib/pmacActivity'
-import { getPmacAttendanceRecordKey, validatePmacAttendanceSubmission } from '@/lib/pmacAttendance'
+import { getPmacAttendanceRecordKey, validatePmacAttendanceEvent, validatePmacAttendanceSubmission } from '@/lib/pmacAttendance'
+import { syncRequestFulfillmentFromPmacEvent } from '@/lib/pmacFulfillment'
 import { prisma } from '@/lib/prisma'
 import { revalidatePmacViews } from '@/lib/pmacRevalidation'
+import { revalidateRequestViews } from '@/lib/requestWorkflow'
 import { sanitizeMultilineText, sanitizeSingleLineText } from '@/lib/sanitization'
 
 import { isCoordinatorRole, getViewerSession, assertPmacActionSession, getActivityActor, buildWorkloadTier } from './actionShared'
@@ -152,13 +154,19 @@ export async function getPmacAttendanceBoard() {
     return []
   }
 
-  return prisma.pmacEvent.findMany({
+  const now = new Date()
+  const events = await prisma.pmacEvent.findMany({
     where: {
       status: {
         in: ['APPROVED', 'COMPLETED'],
       },
+      startDateTime: {
+        lte: now,
+      },
       assignments: {
-        some: {},
+        some: {
+          availabilityResponse: 'YES',
+        },
       },
     },
     include: {
@@ -187,6 +195,9 @@ export async function getPmacAttendanceBoard() {
         },
       },
       assignments: {
+        where: {
+          availabilityResponse: 'YES',
+        },
         include: {
           member: {
             select: {
@@ -205,6 +216,19 @@ export async function getPmacAttendanceBoard() {
       },
     },
     orderBy: { startDateTime: 'desc' },
+  })
+
+  return events.sort((left, right) => {
+    const leftMembers = new Set(left.assignments.map(assignment => assignment.memberId))
+    const rightMembers = new Set(right.assignments.map(assignment => assignment.memberId))
+    const leftRecorded = new Set(left.attendance.filter(record => leftMembers.has(record.memberId)).map(record => record.memberId)).size
+    const rightRecorded = new Set(right.attendance.filter(record => rightMembers.has(record.memberId)).map(record => record.memberId)).size
+    const leftComplete = leftRecorded >= leftMembers.size
+    const rightComplete = rightRecorded >= rightMembers.size
+
+    if (leftComplete !== rightComplete) return leftComplete ? 1 : -1
+    if (left.status !== right.status) return left.status === 'APPROVED' ? -1 : 1
+    return right.startDateTime.getTime() - left.startDateTime.getTime()
   })
 }
 
@@ -225,6 +249,8 @@ export async function savePmacAssignments(eventId: string, assignments: PmacAssi
         status: true,
         startDateTime: true,
         endDateTime: true,
+        sourceType: true,
+        handoffAcknowledgedAt: true,
         sourceDocumentationType: true,
       },
     })
@@ -235,6 +261,9 @@ export async function savePmacAssignments(eventId: string, assignments: PmacAssi
 
     if (event.status !== 'APPROVED' && event.status !== 'COMPLETED') {
       return { success: false, error: 'Assignments can only be managed for approved or completed PMAC events.' }
+    }
+    if (event.sourceType === 'CMAC_REQUEST' && !event.handoffAcknowledgedAt) {
+      return { success: false, error: 'Acknowledge the CMAC handoff before assigning the coverage team.' }
     }
 
     const normalizedAssignments = assignments.map((assignment) => {
@@ -488,8 +517,14 @@ export async function savePmacAssignments(eventId: string, assignments: PmacAssi
           },
         },
       })
+      await syncRequestFulfillmentFromPmacEvent(tx, sanitizedId, {
+        id: session.user.id,
+        name: session.user.name,
+        role: session.user.role,
+      })
     })
 
+    revalidateRequestViews(true)
     revalidatePmacViews([`/pmac/events/${sanitizedId}`])
     return { success: true, warnings }
   } catch (error) {
@@ -526,14 +561,26 @@ export async function respondToPmacAssignment(assignmentId: string, response: 'Y
       return { success: false, error: 'Availability can only be updated after the PMAC event is approved.' }
     }
 
+    if (assignment.availabilityResponse !== 'PENDING') {
+      return { success: false, error: 'Your coverage response has already been submitted and cannot be changed.' }
+    }
+
     await prisma.$transaction(async (tx) => {
-      await tx.pmacEventAssignment.update({
-        where: { id: sanitizedId },
+      const updated = await tx.pmacEventAssignment.updateMany({
+        where: {
+          id: sanitizedId,
+          memberId: session.user.pmacMemberId!,
+          availabilityResponse: 'PENDING',
+        },
         data: {
           availabilityResponse: response,
           respondedAt: new Date(),
         },
       })
+
+      if (updated.count !== 1) {
+        throw new Error('Your coverage response has already been submitted and cannot be changed.')
+      }
 
       await recordPmacActivity(tx, {
         entityType: 'EVENT',
@@ -541,15 +588,21 @@ export async function respondToPmacAssignment(assignmentId: string, response: 'Y
         eventId: assignment.event.id,
         memberId: assignment.memberId,
         ...getActivityActor(session.user),
-        action: 'ASSIGNMENT_RESPONSE_UPDATED',
-        summary: `Updated assignment availability to ${response}.`,
+        action: 'ASSIGNMENT_RESPONSE_SUBMITTED',
+        summary: `Submitted assignment availability as ${response}.`,
+      })
+      await syncRequestFulfillmentFromPmacEvent(tx, assignment.event.id, {
+        id: session.user.id,
+        name: session.user.name,
+        role: session.user.role,
       })
     })
 
+    revalidateRequestViews(true)
     revalidatePmacViews([`/pmac/events/${assignment.event.id}`])
     return { success: true }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Failed to update availability response.' }
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to submit availability response.' }
   }
 }
 
@@ -601,15 +654,24 @@ export async function savePmacAttendance(records: PmacAttendanceInput[]) {
         id: true,
         title: true,
         status: true,
+        startDateTime: true,
         assignments: {
-          where: { memberId: { in: memberIds } },
+          where: {
+            memberId: { in: memberIds },
+            availabilityResponse: 'YES',
+          },
           select: { memberId: true },
         },
       },
     })
 
-    if (events.length !== eventIds.length || events.some(event => event.status !== 'APPROVED' && event.status !== 'COMPLETED')) {
-      return { success: false, error: 'Attendance can only be recorded for approved or completed PMAC events.' }
+    if (events.length !== eventIds.length) {
+      return { success: false, error: 'One or more PMAC events could not be found.' }
+    }
+
+    const eventProblem = events.map(event => validatePmacAttendanceEvent(event)).find(Boolean)
+    if (eventProblem) {
+      return { success: false, error: eventProblem }
     }
 
     const assignedMemberKeys = new Set(events.flatMap(event => (
