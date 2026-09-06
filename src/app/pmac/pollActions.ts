@@ -4,6 +4,7 @@ import { unstable_noStore as noStore } from 'next/cache'
 import { canClosePmacPoll, isPmacPollVoterRole, PMAC_POLL_CREATOR_ROLES, PMAC_POLL_MANAGER_ROLES, PMAC_POLL_VOTER_ROLES, PMAC_VOTE_CHOICES } from '@/lib/pmac'
 import { recordPmacActivity } from '@/lib/pmacActivity'
 import { prisma } from '@/lib/prisma'
+import { closeOpenPmacPoll, recordVoteWhileOpen } from '@/lib/pmacLifecycleWrites'
 import { revalidatePmacViews } from '@/lib/pmacRevalidation'
 import { sanitizeSingleLineText } from '@/lib/sanitization'
 
@@ -259,10 +260,11 @@ export async function updatePmacPoll(payload: PmacPollPayload) {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.pmacPoll.update({
-        where: { id: pollId },
+      const updated = await tx.pmacPoll.updateMany({
+        where: { id: pollId, status: 'DRAFT' },
         data,
       })
+      if (updated.count !== 1) throw new Error('Only draft polls can be edited. Refresh and try again.')
 
       await recordPmacActivity(tx, {
         entityType: 'POLL',
@@ -314,13 +316,14 @@ export async function openPmacPoll(pollId: string) {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.pmacPoll.update({
-        where: { id: sanitizedId },
+      const opened = await tx.pmacPoll.updateMany({
+        where: { id: sanitizedId, status: 'DRAFT', opensAt: poll.opensAt, closesAt: poll.closesAt },
         data: {
           status: 'OPEN',
           opensAt: poll.opensAt ?? new Date(),
         },
       })
+      if (opened.count !== 1) throw new Error('The poll changed. Refresh before opening it.')
 
       await recordPmacActivity(tx, {
         entityType: 'POLL',
@@ -373,13 +376,7 @@ export async function closePmacPoll(pollId: string) {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.pmacPoll.update({
-        where: { id: sanitizedId },
-        data: {
-          status: 'CLOSED',
-          closesAt: new Date(),
-        },
-      })
+      await closeOpenPmacPoll(tx, sanitizedId)
 
       await recordPmacActivity(tx, {
         entityType: 'POLL',
@@ -530,14 +527,11 @@ export async function castPmacVote(pollId: string, selectedOption: PmacVoteChoic
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.pmacVote.create({
-        data: {
-          pollId: sanitizedId,
-          voterId: voter.id,
-          voterMemberId,
-          selectedOption,
-          votedAt: new Date(),
-        },
+      await recordVoteWhileOpen(tx, {
+        pollId: sanitizedId,
+        voterId: voter.id,
+        voterMemberId,
+        selectedOption,
       })
 
       await recordPmacActivity(tx, {

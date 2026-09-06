@@ -5,6 +5,7 @@ import { PMAC_EXECUTIVE_BRANCH_SPECIALTY, PMAC_EXECUTIVE_TITLES, PMAC_PROJECT_LA
 import { recordPmacActivity } from '@/lib/pmacActivity'
 import { getExecutiveBranchForUser, getPmacProjectWhere } from '@/lib/pmacProjects'
 import { prisma } from '@/lib/prisma'
+import { closeAssignedPmacProject, lockEditablePmacProject } from '@/lib/pmacProjectClosure'
 import { revalidatePmacViews } from '@/lib/pmacRevalidation'
 import { sanitizeExternalHttpUrl, sanitizeMultilineText, sanitizeSingleLineText } from '@/lib/sanitization'
 import type { PmacExecutiveTitle, PmacProjectMilestoneStatus, PmacProjectStatus } from '@/types'
@@ -296,11 +297,12 @@ export async function savePmacProject(payload: PmacProjectPayload) {
     if (projectId) {
       const accessibleProject = await assertPmacProjectAccess(projectId, session.user)
       if (status === 'COMPLETED') {
-        const directorChecked = await hasPmacDirectorClosureCheck(projectId)
-        assertPmacProjectCloseAccess(accessibleProject, session.user, directorChecked)
+        throw new Error('Use Submit Final Output to close the project after the director check.')
       }
+      if (accessibleProject.status === 'COMPLETED') throw new Error('Completed projects are final and cannot be reopened.')
 
       await prisma.$transaction(async (tx) => {
+        await lockEditablePmacProject(tx, projectId)
         const current = await tx.pmacProject.findUnique({
           where: { id: projectId },
           select: {
@@ -318,8 +320,8 @@ export async function savePmacProject(payload: PmacProjectPayload) {
           },
         })
 
-        await tx.pmacProject.update({
-          where: { id: projectId },
+        const updated = await tx.pmacProject.updateMany({
+          where: { id: projectId, status: { not: 'COMPLETED' } },
           data: {
             title,
             summary: summary || null,
@@ -328,9 +330,10 @@ export async function savePmacProject(payload: PmacProjectPayload) {
             startDate,
             targetDate,
             status,
-            completedAt: status === 'COMPLETED' ? new Date() : null,
+            completedAt: null,
           },
         })
+        if (updated.count !== 1) throw new Error('Completed projects are final and cannot be reopened.')
 
         if (current && current.status !== status) {
           await recordPmacActivity(tx, {
@@ -446,21 +449,18 @@ export async function updatePmacProjectStatus(projectId: string, status: PmacPro
     }
 
     await prisma.$transaction(async (tx) => {
-      const project = await tx.pmacProject.findUnique({
-        where: { id: sanitizedProjectId },
-        select: {
-          title: true,
-          status: true,
-        },
-      })
+      if (status !== 'COMPLETED') await lockEditablePmacProject(tx, sanitizedProjectId)
+      const project = status === 'COMPLETED'
+        ? await closeAssignedPmacProject(tx, sanitizedProjectId, session.user)
+        : await tx.pmacProject.findUnique({ where: { id: sanitizedProjectId }, select: { title: true, status: true } })
 
-      await tx.pmacProject.update({
-        where: { id: sanitizedProjectId },
-        data: {
-          status,
-          completedAt: status === 'COMPLETED' ? new Date() : null,
-        },
-      })
+      if (status !== 'COMPLETED') {
+        const updated = await tx.pmacProject.updateMany({
+          where: { id: sanitizedProjectId, status: { not: 'COMPLETED' } },
+          data: { status, completedAt: null },
+        })
+        if (updated.count !== 1) throw new Error('Completed projects are final and cannot be reopened.')
+      }
 
       if (project && project.status !== status) {
         await recordPmacActivity(tx, {
@@ -495,6 +495,7 @@ export async function checkPmacProjectForClosure(projectId: string) {
 
     await assertPmacProjectAccess(sanitizedProjectId, session.user)
     await prisma.$transaction(async (tx) => {
+      await lockEditablePmacProject(tx, sanitizedProjectId)
       const project = await tx.pmacProject.findUnique({
         where: { id: sanitizedProjectId },
         select: {
@@ -552,27 +553,7 @@ export async function submitPmacProjectOutput(payload: PmacProjectOutputPayload)
     }
 
     await prisma.$transaction(async (tx) => {
-      const project = await tx.pmacProject.findUnique({
-        where: { id: projectId },
-        select: {
-          title: true,
-          status: true,
-        },
-      })
-
-      if (!project) {
-        throw new Error('Project not found.')
-      }
-
-      await tx.pmacProject.update({
-        where: { id: projectId },
-        data: {
-          outputSummary,
-          outputSubmittedAt: new Date(),
-          status: 'COMPLETED',
-          completedAt: new Date(),
-        },
-      })
+      const project = await closeAssignedPmacProject(tx, projectId, session.user, outputSummary)
 
       await recordPmacActivity(tx, {
         entityType: 'PROJECT',
@@ -616,6 +597,7 @@ export async function attachPmacProjectLink(payload: PmacProjectLinkPayload) {
 
     await assertPmacProjectAccess(projectId, session.user)
     await prisma.$transaction(async (tx) => {
+      await lockEditablePmacProject(tx, projectId)
       const project = await tx.pmacProject.findUnique({
         where: { id: projectId },
         select: { title: true },
@@ -716,6 +698,7 @@ export async function assignPmacProjectMembers(payload: PmacProjectMemberPayload
     })
 
     await prisma.$transaction(async (tx) => {
+      await lockEditablePmacProject(tx, projectId)
       await tx.pmacProjectAssignment.deleteMany({
         where: {
           projectId,
@@ -789,6 +772,7 @@ export async function savePmacProjectMilestone(payload: PmacProjectMilestonePayl
     const project = await assertPmacProjectAccess(projectId, session.user)
 
     await prisma.$transaction(async (tx) => {
+      await lockEditablePmacProject(tx, projectId)
       let previousMilestone: { title: string; dueDate: Date; status: string } | null = null
 
       if (milestoneId) {
@@ -890,6 +874,7 @@ export async function updatePmacProjectMilestoneStatus(milestoneId: string, stat
 
     await assertPmacProjectAccess(milestone.projectId, session.user)
     await prisma.$transaction(async (tx) => {
+      await lockEditablePmacProject(tx, milestone.projectId)
       await tx.pmacProjectMilestone.update({
         where: { id: sanitizedMilestoneId },
         data: { status },

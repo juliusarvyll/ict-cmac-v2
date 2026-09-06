@@ -4,6 +4,8 @@ import { loadEnvConfig } from '@next/env'
 import { Prisma, PrismaClient } from '@prisma/client'
 
 import { saveFirstCoverageResponse } from '../src/lib/pmacCoverageResponse'
+import { closeOpenPmacPoll, completeApprovedPmacEvent, recordVoteWhileOpen } from '../src/lib/pmacLifecycleWrites'
+import { closeAssignedPmacProject, lockEditablePmacProject } from '../src/lib/pmacProjectClosure'
 
 async function main() {
   loadEnvConfig(process.cwd())
@@ -25,6 +27,7 @@ async function main() {
   const eventId = `${prefix}-event`
   const assignmentId = `${prefix}-assignment`
   const pollId = `${prefix}-poll`
+  const projectId = `${prefix}-project`
   let created = false
 
   // A gate ensures both transactions are open before either attempts its write.
@@ -58,6 +61,15 @@ async function main() {
         id: assignmentId, eventId, memberId, assignedById: userId, assignmentRole: 'PHOTOGRAPHER',
       } })
       await tx.pmacPoll.create({ data: { id: pollId, title: prefix, createdById: userId } })
+      await tx.pmacProject.create({ data: {
+        id: projectId, title: prefix, branch: 'HEAD_PHOTOGRAPHER', headMemberId: memberId,
+        launchedById: userId, startDate: new Date('2000-01-01'), targetDate: new Date('2000-02-01'),
+        outputSummary: 'Temporary test output',
+      } })
+      await tx.pmacActivityLog.create({ data: {
+        entityType: 'PROJECT', entityId: projectId, projectId, actorId: userId,
+        actorName: prefix, actorRole: 'PMAC_DIRECTOR', action: 'PROJECT_DIRECTOR_CHECKED', summary: 'Temporary test review',
+      } })
     })
     created = true
 
@@ -91,11 +103,63 @@ async function main() {
     assert(duplicate?.status === 'rejected' && duplicate.reason instanceof Prisma.PrismaClientKnownRequestError && duplicate.reason.code === 'P2002')
     assert.equal(await db.pmacVote.count({ where: { pollId } }), 1)
     console.log('PASS: simultaneous duplicate votes produce one row and one unique-constraint rejection.')
+
+    await db.pmacPoll.update({ where: { id: pollId }, data: { status: 'OPEN', opensAt: null, closesAt: null } })
+    const closures = await race((tx) => closeOpenPmacPoll(tx, pollId))
+    assert.equal(closures.filter((result) => result.status === 'fulfilled').length, 1)
+    assert(closures.some((result) => result.status === 'rejected' && /Only open polls/.test(result.reason.message)))
+    assert.equal((await db.pmacPoll.findUniqueOrThrow({ where: { id: pollId } })).status, 'CLOSED')
+    console.log('PASS: simultaneous poll closure has one winner.')
+
+    await db.pmacVote.deleteMany({ where: { pollId } })
+    await assert.rejects(db.$transaction((tx) => recordVoteWhileOpen(tx, { pollId, voterId: userId, voterMemberId: memberId, selectedOption: 'YES' })), /only available while the poll is open/)
+    await db.pmacPoll.update({ where: { id: pollId }, data: { status: 'OPEN', closesAt: null } })
+    const votingAndClosure = await race((tx, choice) => choice === 'YES'
+      ? closeOpenPmacPoll(tx, pollId)
+      : recordVoteWhileOpen(tx, { pollId, voterId: userId, voterMemberId: memberId, selectedOption: 'NO' }).then(() => undefined))
+    assert.equal(votingAndClosure[0].status, 'fulfilled', 'Closure must succeed, either before or after the competing vote.')
+    if (votingAndClosure[1].status === 'rejected') assert.match(votingAndClosure[1].reason.message, /only available while the poll is open/)
+    await assert.rejects(db.$transaction((tx) => recordVoteWhileOpen(tx, { pollId, voterId: userId, voterMemberId: memberId, selectedOption: 'YES' })), /only available while the poll is open/)
+    assert.equal(await db.pmacVote.count({ where: { pollId } }), votingAndClosure[1].status === 'fulfilled' ? 1 : 0)
+    console.log('PASS: vote/closure serialize and no vote can be inserted after closure.')
+
+    await db.pmacEvent.update({ where: { id: eventId }, data: { status: 'APPROVED', completedAt: null } })
+    await db.pmacEventAssignment.update({ where: { id: assignmentId }, data: { availabilityResponse: 'YES', assignmentRole: 'ALL_AROUND' } })
+    await db.pmacAttendance.create({ data: { eventId, memberId, status: 'PRESENT', recordedById: userId } })
+    const completions = await race((tx) => completeApprovedPmacEvent(tx, eventId))
+    assert.equal(completions.filter((result) => result.status === 'fulfilled').length, 1)
+    assert(completions.some((result) => result.status === 'rejected' && /Only approved/.test(result.reason.message)))
+    assert.equal((await db.pmacEvent.findUniqueOrThrow({ where: { id: eventId } })).status, 'COMPLETED')
+    console.log('PASS: simultaneous event completion has one winner.')
+
+    await assert.rejects(db.$transaction((tx) => closeAssignedPmacProject(tx, projectId, { role: 'PMAC_EXECUTIVE', pmacMemberId: `${prefix}-other` })), /Only the assigned executive head/)
+    const projectClosures = await race((tx) => closeAssignedPmacProject(tx, projectId, { role: 'PMAC_EXECUTIVE', pmacMemberId: memberId }))
+    assert.equal(projectClosures.filter((result) => result.status === 'fulfilled').length, 1)
+    assert(projectClosures.some((result) => result.status === 'rejected' && /already closed/.test(result.reason.message)))
+    assert.equal((await db.pmacProject.findUniqueOrThrow({ where: { id: projectId } })).status, 'COMPLETED')
+    console.log('PASS: only the assigned head can close; simultaneous project closure has one winner.')
+
+    await db.pmacProject.update({ where: { id: projectId }, data: { status: 'ACTIVE', completedAt: null } })
+    const milestone = await db.pmacProjectMilestone.create({ data: { projectId, title: 'Temporary milestone', dueDate: new Date(), status: 'DONE' } })
+    const milestoneRace = await race(async (tx, choice) => {
+      if (choice === 'YES') await closeAssignedPmacProject(tx, projectId, { role: 'PMAC_EXECUTIVE', pmacMemberId: memberId })
+      else {
+        await lockEditablePmacProject(tx, projectId)
+        await tx.pmacProjectMilestone.update({ where: { id: milestone.id }, data: { status: 'TODO' } })
+      }
+    })
+    assert.equal(milestoneRace.filter((result) => result.status === 'fulfilled').length, 1)
+    const finalProject = await db.pmacProject.findUniqueOrThrow({ where: { id: projectId }, include: { milestones: true } })
+    assert.equal(finalProject.milestones[0].status, finalProject.status === 'COMPLETED' ? 'DONE' : 'TODO')
+    const blockedEdit = milestoneRace.find((result) => result.status === 'rejected')
+    assert(blockedEdit?.status === 'rejected' && /Complete every project milestone|cannot be edited/.test(blockedEdit.reason.message))
+    console.log('PASS: milestone edit versus project closure cannot leave an incomplete milestone on a closed project.')
   } finally {
     try {
       if (created) {
         // Exact generated IDs only; event and poll children cascade. Never clean user data.
         await db.$transaction([
+          db.pmacProject.delete({ where: { id: projectId } }),
           db.pmacPoll.delete({ where: { id: pollId } }),
           db.pmacEvent.delete({ where: { id: eventId } }),
           db.user.delete({ where: { id: userId } }),
