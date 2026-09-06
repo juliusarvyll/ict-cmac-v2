@@ -511,21 +511,8 @@ export async function checkPmacProjectForClosure(projectId: string) {
         throw new Error('Completed projects are already closed.')
       }
 
-      const existingCheck = await tx.pmacActivityLog.findFirst({
-        where: {
-          projectId: sanitizedProjectId,
-          action: 'PROJECT_DIRECTOR_CHECKED',
-          actorRole: 'PMAC_DIRECTOR',
-        },
-        select: {
-          id: true,
-        },
-      })
-
-      if (existingCheck) {
-        return
-      }
-
+      // A prior check may have been invalidated by subsequent project changes.
+      // Keep each review as a new audit entry instead of silently ignoring it.
       await recordPmacActivity(tx, {
         entityType: 'PROJECT',
         entityId: sanitizedProjectId,

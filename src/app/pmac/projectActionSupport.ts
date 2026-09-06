@@ -276,6 +276,7 @@ export async function hasPmacDirectorClosureCheck(projectId: string) {
       action: 'PROJECT_DIRECTOR_CHECKED',
       actorRole: 'PMAC_DIRECTOR',
     },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: {
       id: true,
       createdAt: true,
