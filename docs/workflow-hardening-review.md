@@ -95,4 +95,38 @@ The published [Next.js proxy advisory](https://github.com/advisories/GHSA-6gpp-x
 
 **Verification:** performed in a separate clean Git worktree on Node 22, without copying application secrets or changing the running app's installed dependencies. `npm ci` (including Prisma generation), the exact CI command `npm audit --audit-level=moderate`, all 166 tests, `npm run typecheck`, and the full `npm run build` passed. Audit reports **zero vulnerabilities**. `npm run lint` exited successfully with two non-blocking navigation warnings from the newer Next.js rules (`new-request/page.tsx:380` and `requests/page.tsx:708`). The production build retains the previously documented dynamic attachment-path tracing warning, now precisely located at `api/pmac/attachments/route.ts:200`. Those warnings are separate from the dependency audit and were not suppressed.
 
-**Local rollout:** after reviewing/pulling this change, stop the development server, run `npm ci`, and restart it. The current running workspace intentionally retains its old installed packages until that restart/install; the committed lockfile and clean verification worktree contain the corrected dependency graph. GitHub CI must still run on the pushed commit.
+**Local rollout at initial verification:** the running workspace retained its old installed packages while the clean worktree verified the corrected dependency graph. After pulling, stop the development server, run `npm ci`, and restart it. The follow-up status below supersedes that initial local/CI status.
+
+## PR #15 validation follow-up
+
+The security changes landed after PR #14's merge, so they are being reviewed separately in [PR #15](https://github.com/justNyarks/ict-cmac-v2/pull/15). The branch remains unmerged for owner review. Installed local Next.js and NextAuth now match the updated dependency versions.
+
+### Changes and short review
+
+| Change | Why it was needed / origin of the gap | Verification |
+| --- | --- | --- |
+| Use Next.js navigation for request editing and its successful return. | Two internal navigations still used full-page `window.location.href` assignments. The updated Next.js lint rules exposed these older patterns. Destinations and encoded record IDs are unchanged. | ESLint and TypeScript pass without navigation warnings; production build passes. Browser acceptance remains pending. |
+| Mark the generated attachment output path as runtime-only for Turbopack. | File tracing tried to resolve a path assembled from an upload month and random filename at build time. Those future uploaded files are not build inputs. The narrow tracing annotation does not change authorization, storage location or download behavior. | Production build passes without the previous tracing warning. Persistent storage is still required; this annotation does not solve serverless storage. |
+| Extract the atomic coverage write and add an opt-in real-MySQL concurrency check. | Earlier regression tests mocked competing writes, leaving actual database locking and uniqueness unverified. The server action and database check now call the same conditional write helper; session checks remain in the action. | Five simultaneous Yes/No races each saved exactly one response, later overwrites failed, unrelated-member and completed-event writes failed, and concurrent duplicate votes produced one row plus a `P2002` rejection. |
+
+### Repeatable database check
+
+`npm run test:concurrency` is opt-in, refuses production mode and non-loopback MySQL URLs, and uses uniquely named temporary fixtures with an inactive account. Prefer an isolated local test database with the application's schema already provisioned. It uses `PMAC_TEST_DATABASE_URL` when set, otherwise the configured local `DATABASE_URL`; it does not create or migrate a database. The run completed against local MySQL and removed all of its temporary records. No existing application records were changed.
+
+PowerShell:
+
+```powershell
+$env:PMAC_CONCURRENCY_TESTS = '1'
+try { npm run test:concurrency } finally { Remove-Item Env:PMAC_CONCURRENCY_TESTS }
+```
+
+These tests verify the coverage write and database vote uniqueness, **not** full HTTP/session authorization, concurrent event completion, poll closure races, project closure races, or notification delivery. Those broader workflow checks remain pending. An interrupted process may leave fixtures with the printed/generated `concurrency-<UUID>` prefix; inspect exact IDs before any manual cleanup.
+
+### Latest verification and remaining blockers
+
+- All 166 Vitest tests pass; ESLint and `npx tsc --noEmit` pass. `npx next build` passes with 39 generated pages and no attachment tracing warning. The standard clean-install/build verification from the dependency follow-up above also passed; this follow-up uses the existing generated Prisma client.
+- Local `npm audit --audit-level=moderate` reports zero vulnerabilities. PR #15's [security audit at commit 57f329b](https://github.com/justNyarks/ict-cmac-v2/actions/runs/34052373989) passed. Check the PR again for the subsequent pushed commit's results.
+- Signed-in browser acceptance is still blocked: the browser integration reports no connected browser, including after the user's retry confirmation. No live role/notification/attachment/attendance acceptance is claimed.
+- The Vercel preview at commit 57f329b failed separately from the passing security audit. Log retrieval failed because the Vercel CLI token is invalid. The deployment cause is not yet established; owner login or the build log is needed.
+- PMAC uploads still require durable writable storage. The existing Docker Compose named volume supports the container deployment, but local upload writes are not a durable Vercel Functions storage solution. [Vercel documents the local-versus-deployed filesystem difference](https://vercel.com/kb/guide/why-does-my-serverless-function-work-locally-but-not-when-deployed). Choose persistent hosting or external object storage before accepting production uploads on Vercel; no storage migration was performed here.
+- The current Vercel build command runs `prisma db push`. Confirm previews use an isolated database and take a backup before deployment. Backup restore, deployed upload persistence and deployed legacy-file access protection remain unverified.

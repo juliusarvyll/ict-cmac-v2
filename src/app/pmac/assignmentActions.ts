@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client'
 import { unstable_noStore as noStore } from 'next/cache'
 import { getDutyRolesForSpecialties, getRecommendedAssignmentRoles, isPmacAttendanceManagerRole, isPmacStaffingManagerRole, PMAC_ATTENDANCE_STATUSES, PMAC_EVENT_DUTY_ROLES } from '@/lib/pmac'
 import { recordPmacActivity } from '@/lib/pmacActivity'
+import { saveFirstCoverageResponse } from '@/lib/pmacCoverageResponse'
 import { getPmacAttendanceRecordKey, validatePmacAttendanceEvent, validatePmacAttendanceSubmission } from '@/lib/pmacAttendance'
 import { syncRequestFulfillmentFromPmacEvent } from '@/lib/pmacFulfillment'
 import { prisma } from '@/lib/prisma'
@@ -574,22 +575,7 @@ export async function respondToPmacAssignment(assignmentId: string, response: 'Y
     }
 
     await prisma.$transaction(async (tx) => {
-      const updated = await tx.pmacEventAssignment.updateMany({
-        where: {
-          id: sanitizedId,
-          memberId: session.user.pmacMemberId!,
-          availabilityResponse: 'PENDING',
-          event: { status: 'APPROVED' },
-        },
-        data: {
-          availabilityResponse: response,
-          respondedAt: new Date(),
-        },
-      })
-
-      if (updated.count !== 1) {
-        throw new Error('Your coverage response has already been submitted and cannot be changed.')
-      }
+      await saveFirstCoverageResponse(tx, sanitizedId, session.user.pmacMemberId!, response)
 
       await recordPmacActivity(tx, {
         entityType: 'EVENT',
