@@ -1,9 +1,8 @@
+import { getAuthenticatedSession } from '@/lib/security'
   'use server'
 
 import { unstable_noStore as noStore } from "next/cache"
 import { prisma } from "@/lib/prisma"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
 import { getNotificationFeed } from "@/lib/notifications"
 import { isCoreWorkflowRole } from "@/lib/roles"
 
@@ -63,7 +62,7 @@ function getAttentionStatusLabel(request: { status: string; createdAt: Date; coo
 
 export async function getDashboardStats() {
   noStore()
-  const session = await getServerSession(authOptions)
+  const session = await getAuthenticatedSession()
   if (!session || !session.user) return null
   if (!isCoreWorkflowRole(session.user.role)) return null
 

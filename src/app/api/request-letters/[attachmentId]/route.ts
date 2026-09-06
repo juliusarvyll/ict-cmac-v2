@@ -1,7 +1,6 @@
+import { getAuthenticatedSession } from '@/lib/security'
 import { NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 
-import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { isPmacStaffingManagerRole } from '@/lib/pmac'
 import { isCoreWorkflowRole } from '@/lib/roles'
@@ -10,7 +9,7 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ attachmentId: string }> }
 ) {
-  const session = await getServerSession(authOptions)
+  const session = await getAuthenticatedSession()
   if (!session?.user || (!isCoreWorkflowRole(session.user.role) && !isPmacStaffingManagerRole(session.user.role))) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }

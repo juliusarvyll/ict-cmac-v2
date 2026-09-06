@@ -1,9 +1,7 @@
 import type { Prisma } from '@prisma/client'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { canClosePmacPoll, getDutyRolesForSpecialties, PMAC_EXECUTIVE_TITLE_LABELS, getRecommendedAssignmentRoles, isPmacAssignmentResponderRole, isPmacAttendanceManagerRole, isPmacCreatorRole, isPmacEventManagerRole, isPmacPollManagerRole, isPmacPollMonitorRole, isPmacPollVoterRole, isPmacStaffingManagerRole, PMAC_ATTENDANCE_STATUSES, PMAC_EVENT_DUTY_ROLES, PMAC_EVENT_DUTY_ROLE_LABELS, PMAC_OPERATIONAL_ROLES, PMAC_OVERSIGHT_ROLES, PMAC_POLL_RESULTS_VISIBILITY, PMAC_POLL_TYPES, PMAC_POLL_VOTER_ROLES, PMAC_PROJECT_MILESTONE_STATUSES, PMAC_PROJECT_STATUSES, PMAC_VOTE_CHOICES } from '@/lib/pmac'
 import { hasPmacV4Delegates, prisma } from '@/lib/prisma'
-import { assertActionAccess } from '@/lib/security'
+import { assertActionAccess, getAuthenticatedSession } from '@/lib/security'
 import { sanitizeMultilineText, sanitizeSingleLineText } from '@/lib/sanitization'
 import type { DocumentationType, PmacClubRole, PmacExecutiveTitle, PmacProjectLinkType, PmacProjectMilestoneStatus, PmacProjectStatus, PmacSpecialty, Role } from '@/types'
 
@@ -528,7 +526,7 @@ export function getPmacCalendarWhere(user: SessionUser): Prisma.PmacEventWhereIn
 }
 
 export async function getViewerSession() {
-  const session = await getServerSession(authOptions)
+  const session = await getAuthenticatedSession()
   if (!session?.user || !isPmacAllowedRole(session.user.role)) {
     return null
   }

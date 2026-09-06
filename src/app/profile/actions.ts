@@ -1,14 +1,14 @@
 'use server'
 
+import { getAuthenticatedSession } from '@/lib/security'
+
 import type { Prisma } from "@prisma/client"
 import { hasUserSecurityFields, prisma } from "@/lib/prisma"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
 import bcrypt from "bcryptjs"
 import { sanitizePasswordInput, sanitizeSingleLineText } from "@/lib/sanitization"
 
 export async function updateProfile(data: { name: string; currentPassword?: string; newPassword?: string }) {
-  const session = await getServerSession(authOptions)
+  const session = await getAuthenticatedSession()
   if (!session?.user) return { success: false, error: 'Not authenticated' }
 
   const userId = session.user.id

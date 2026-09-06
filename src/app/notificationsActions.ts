@@ -1,12 +1,12 @@
 'use server'
 
-import { getServerSession } from "next-auth"
+import { getAuthenticatedSession } from '@/lib/security'
 
-import { authOptions } from "@/lib/auth"
+
 import { getNotificationFeed, markNotificationRead, markNotificationsRead } from "@/lib/notifications"
 
 export async function getNotifications() {
-  const session = await getServerSession(authOptions)
+  const session = await getAuthenticatedSession()
   if (!session || !session.user) return []
 
   try {
@@ -18,7 +18,7 @@ export async function getNotifications() {
 }
 
 export async function markNotificationAsRead(notificationId: string, module: 'CORE' | 'PMAC') {
-  const session = await getServerSession(authOptions)
+  const session = await getAuthenticatedSession()
   if (!session?.user?.id) {
     return { success: false, error: 'Authentication required.' }
   }
@@ -33,7 +33,7 @@ export async function markNotificationAsRead(notificationId: string, module: 'CO
 }
 
 export async function markAllNotificationsAsRead(notifications: Array<{ id: string; module: 'CORE' | 'PMAC' }>) {
-  const session = await getServerSession(authOptions)
+  const session = await getAuthenticatedSession()
   if (!session?.user?.id) {
     return { success: false, error: 'Authentication required.' }
   }

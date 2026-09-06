@@ -1,10 +1,10 @@
 'use server'
 
+import { getAuthenticatedSession } from '@/lib/security'
+
 import { Prisma, type ServiceType } from "@prisma/client"
 import { unstable_noStore as noStore } from "next/cache"
-import { getServerSession } from "next-auth"
 
-import { authOptions } from "@/lib/auth"
 import { findRequestConflicts } from "@/lib/conflicts"
 import { revalidatePmacViews } from "@/lib/pmacRevalidation"
 import { syncPmacEventFromServiceRequest } from "@/lib/pmacRequestSync"
@@ -393,7 +393,7 @@ export async function getRequests() {
   noStore()
 
   try {
-    const session = await getServerSession(authOptions)
+    const session = await getAuthenticatedSession()
     if (!session || !session.user) {
       return []
     }
@@ -444,7 +444,7 @@ export async function getRequests() {
 export async function getCalendarRequests() {
   noStore()
 
-  const session = await getServerSession(authOptions)
+  const session = await getAuthenticatedSession()
   if (!session || !session.user) return []
   if (!isCoreWorkflowRole(session.user.role)) return []
 
