@@ -1,5 +1,7 @@
 'use client'
 
+import { runReverifiedAction } from '@/lib/reverificationClient'
+
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState, useTransition } from 'react'
@@ -116,7 +118,7 @@ export default function PmacProjectsPageClient() {
   function submitProject() {
     setMessage('')
     startTransition(async () => {
-      const result = await savePmacProject(projectForm)
+const result = await runReverifiedAction(() => savePmacProject(projectForm))
       if (result.success) {
         setProjectForm(DEFAULT_PROJECT_FORM)
         await loadProjects()
@@ -131,10 +133,10 @@ export default function PmacProjectsPageClient() {
     const memberIds = teamForms[projectId] ?? currentMemberIds
     setMessage('')
     startTransition(async () => {
-      const result = await assignPmacProjectMembers({
+const result = await runReverifiedAction(() => assignPmacProjectMembers({
         projectId,
         memberIds,
-      })
+      }))
       if (result.success) {
         await loadProjects()
         setMessage('Project members assigned.')
@@ -148,12 +150,12 @@ export default function PmacProjectsPageClient() {
     const form = milestoneForms[projectId] ?? DEFAULT_MILESTONE_FORM
     setMessage('')
     startTransition(async () => {
-      const result = await savePmacProjectMilestone({
+const result = await runReverifiedAction(() => savePmacProjectMilestone({
         projectId,
         title: form.title,
         dueDate: form.dueDate,
         status: 'TODO',
-      })
+      }))
       if (result.success) {
         setMilestoneForms(previous => ({ ...previous, [projectId]: DEFAULT_MILESTONE_FORM }))
         await loadProjects()
@@ -167,7 +169,7 @@ export default function PmacProjectsPageClient() {
   function changeProjectStatus(projectId: string, status: PmacProjectStatus) {
     setMessage('')
     startTransition(async () => {
-      const result = await updatePmacProjectStatus(projectId, status)
+const result = await runReverifiedAction(() => updatePmacProjectStatus(projectId, status))
       if (result.success) {
         await loadProjects()
       } else {
@@ -179,7 +181,7 @@ export default function PmacProjectsPageClient() {
   function checkProjectForClosure(projectId: string) {
     setMessage('')
     startTransition(async () => {
-      const result = await checkPmacProjectForClosure(projectId)
+const result = await runReverifiedAction(() => checkPmacProjectForClosure(projectId))
       if (result.success) {
         await loadProjects()
         setMessage('Project checked for closure.')
@@ -192,7 +194,7 @@ export default function PmacProjectsPageClient() {
   function changeMilestoneStatus(milestoneId: string, status: PmacProjectMilestoneStatus) {
     setMessage('')
     startTransition(async () => {
-      const result = await updatePmacProjectMilestoneStatus(milestoneId, status)
+const result = await runReverifiedAction(() => updatePmacProjectMilestoneStatus(milestoneId, status))
       if (result.success) {
         await loadProjects()
       } else {
@@ -205,10 +207,10 @@ export default function PmacProjectsPageClient() {
     const outputSummary = outputForms[projectId] ?? ''
     setMessage('')
     startTransition(async () => {
-      const result = await submitPmacProjectOutput({
+const result = await runReverifiedAction(() => submitPmacProjectOutput({
         projectId,
         outputSummary,
-      })
+      }))
       if (result.success) {
         setOutputForms(previous => ({ ...previous, [projectId]: '' }))
         await loadProjects()
@@ -223,12 +225,12 @@ export default function PmacProjectsPageClient() {
     const form = linkForms[projectId] ?? DEFAULT_LINK_FORM
     setMessage('')
     startTransition(async () => {
-      const result = await attachPmacProjectLink({
+const result = await runReverifiedAction(() => attachPmacProjectLink({
         projectId,
         label: form.label,
         url: form.url,
         type: form.type,
-      })
+      }))
       if (result.success) {
         setLinkForms(previous => ({ ...previous, [projectId]: DEFAULT_LINK_FORM }))
         await loadProjects()

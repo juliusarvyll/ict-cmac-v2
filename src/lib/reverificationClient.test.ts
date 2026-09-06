@@ -9,6 +9,7 @@ import {
   registerReverificationPrompt,
   REVERIFICATION_REQUIRED_MESSAGE,
   runWithReverification,
+  runReverifiedAction,
 } from './reverificationClient'
 
 const verifyPassword = vi.mocked(verifySensitiveActionPassword)
@@ -21,6 +22,13 @@ afterEach(() => {
 })
 
 describe('runWithReverification', () => {
+  it('returns cancellation and network failures to the form without losing its state', async () => {
+    unregisterPrompt = registerReverificationPrompt(async () => null)
+    expect(await runReverifiedAction(async () => ({ success: false, error: REVERIFICATION_REQUIRED_MESSAGE })))
+      .toEqual({ success: false, error: 'Re-verification was cancelled.' })
+    expect(await runReverifiedAction(async () => { throw new Error('Network unavailable') }))
+      .toEqual({ success: false, error: 'Network unavailable' })
+  })
   it('prompts, verifies, and retries a server action that returns the zero-trust error', async () => {
     const prompt = vi.fn(async () => 'password123')
     unregisterPrompt = registerReverificationPrompt(prompt)

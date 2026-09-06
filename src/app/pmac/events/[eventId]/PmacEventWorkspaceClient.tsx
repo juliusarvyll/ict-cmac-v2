@@ -1,5 +1,7 @@
 'use client'
 
+import { runReverifiedAction } from '@/lib/reverificationClient'
+
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
@@ -937,7 +939,7 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
                   disabled={isPending}
                   onClick={() => {
                     startTransition(async () => {
-                      const result = await approvePmacEvent(event.id, approvalRemarks)
+const result = await runReverifiedAction(() => approvePmacEvent(event.id, approvalRemarks))
                       if (!result.success) {
                         showToast('error', result.error || 'Failed to approve PMAC event.')
                         return
@@ -955,7 +957,7 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
                   disabled={isPending}
                   onClick={() => {
                     startTransition(async () => {
-                      const result = await rejectPmacEvent(event.id, approvalRemarks)
+const result = await runReverifiedAction(() => rejectPmacEvent(event.id, approvalRemarks))
                       if (!result.success) {
                         showToast('error', result.error || 'Failed to reject PMAC event.')
                         return
