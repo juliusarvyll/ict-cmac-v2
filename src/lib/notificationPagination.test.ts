@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ logs: vi.fn(), receipts: vi.fn() }))
 vi.mock('@/lib/prisma', () => ({ prisma: { auditLog: { findMany: mocks.logs }, notificationReceipt: { findMany: mocks.receipts } }, hasPmacV4Delegates: () => false }))
 import { getNotificationPage } from './notifications'
-const user = { id: 'u1', role: 'SECRETARY' as const, name: 'Secretary', pmacMemberId: null }
+const user = { id: 'u1', role: 'SECRETARY' as const, name: 'Secretary', pmacMemberId: null, school: null, isActive: true, mustChangePassword: false }
 describe('notification completeness', () => {
   beforeEach(() => {
     vi.clearAllMocks()

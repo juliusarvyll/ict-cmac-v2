@@ -96,6 +96,7 @@ export default function DashboardPageClient() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [workflowExpanded, setWorkflowExpanded] = useState(true)
+  const [notificationError, setNotificationError] = useState('')
 
   useEffect(() => {
     getDashboardStats().then((data) => {
@@ -121,18 +122,15 @@ export default function DashboardPageClient() {
     return () => window.removeEventListener(NOTIFICATIONS_READ_EVENT, handleNotificationsRead)
   }, [])
 
-  const handleNotifClick = (notification: AppNotification) => {
-    setStats((previous) => previous ? ({
-      ...previous,
-      notifications: previous.notifications.map((item) => (
-        item.id === notification.id ? { ...item, isRead: true } : item
-      )),
-    }) : previous)
-    announceNotificationsRead([notification.id])
-    router.push(notification.href)
-    void markNotificationAsRead(notification.id, notification.module).catch((error) => {
-      console.error('MARK_NOTIFICATION_READ_ERROR:', error)
-    })
+  const handleNotifClick = async (notification: AppNotification) => {
+    try {
+      const result = await markNotificationAsRead(notification.id, notification.module)
+      if (!result.success) throw new Error(result.error)
+      announceNotificationsRead([notification.id])
+      router.push(notification.href)
+    } catch {
+      setNotificationError('Could not save notification read state. Please try again.')
+    }
   }
 
   if (loading || !stats) {
@@ -147,6 +145,7 @@ export default function DashboardPageClient() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 animate-fade-in">
+      {notificationError ? <p role="alert" className="text-sm text-red-600">{notificationError}</p> : null}
       <div
         className="relative rounded-2xl overflow-hidden shadow-xl"
         style={{ background: 'var(--hero-gradient)' }}
@@ -203,12 +202,14 @@ export default function DashboardPageClient() {
                   return
                 }
 
-                setStats((previous) => previous ? ({
-                  ...previous,
-                  notifications: previous.notifications.map((notification) => ({ ...notification, isRead: true })),
-                }) : previous)
-                announceNotificationsRead(unread.map((notification) => notification.id))
-                await markAllNotificationsAsRead(unread)
+                try {
+                  const result = await markAllNotificationsAsRead()
+                  if (!result.success) throw new Error(result.error)
+                  announceNotificationsRead(unread.map(notification => notification.id))
+                  setNotificationError('')
+                } catch {
+                  setNotificationError('Could not mark notifications read. Please try again.')
+                }
               }}
               className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-emerald-600 transition-colors"
             >

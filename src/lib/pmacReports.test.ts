@@ -19,7 +19,7 @@ describe('report accuracy', () => {
       { assignmentRole: 'VIDEOGRAPHER', availabilityResponse: 'PENDING' },
     ] }])
     const result = await buildPmacReportAnalytics()
-    // BOTH recommends photographer, videographer and editor: one of three is confirmed.
+    // BOTH recommends photographer, videographer and journalist: one of three is confirmed.
     expect(result.coverage[0]).toMatchObject({ assigned: 3, confirmed: 1, pending: 1, percentage: 33 })
   })
   it('keeps no attendance history separate from perfect attendance', async () => {

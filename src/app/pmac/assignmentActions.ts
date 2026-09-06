@@ -258,7 +258,7 @@ export async function savePmacAssignments(eventId: string, assignments: PmacAssi
     }
 
     if (event.status !== 'APPROVED') {
-      return { success: false, error: 'Assignments can only be managed for approved or completed PMAC events.' }
+      return { success: false, error: 'Staffing is locked for completed or unapproved PMAC events.' }
     }
     if (event.sourceType === 'CMAC_REQUEST' && !event.handoffAcknowledgedAt) {
       return { success: false, error: 'Acknowledge the CMAC handoff before assigning the coverage team.' }

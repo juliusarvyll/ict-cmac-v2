@@ -1,5 +1,6 @@
+'use server'
+
 import { getAuthenticatedSession } from '@/lib/security'
-  'use server'
 
 import { unstable_noStore as noStore } from "next/cache"
 import { prisma } from "@/lib/prisma"
