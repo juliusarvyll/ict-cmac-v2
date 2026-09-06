@@ -70,3 +70,29 @@ Each item records the observed gap, necessary change, and verification. Checked 
 - `npm run build`: its Prisma-generation prerequisite was blocked by Windows `EPERM` on the engine DLL held by the running app. The existing generated client was used for the successful direct Next.js build. The running server was not stopped. Retry the standard command after stopping it during deployment validation.
 - `git diff --check`: passed (Git emitted Windows line-ending warnings, not whitespace errors).
 - No browser visual run or real-database concurrency test was performed in this review. Use the manual acceptance checklist above before merging.
+
+## Follow-up: dependency audit failure
+
+The pasted CI report was reproduced: nine vulnerable dependency entries (one critical, six high, one moderate, one low). The workflow correctly failed at its existing moderate threshold; that threshold was not weakened or bypassed.
+
+**Cause:** the committed lockfile still selected vulnerable direct and transitive versions. Passing application tests does not check newly published package advisories, and compatible version ranges do not update a lockfile used by `npm ci`.
+
+**Change:** refreshed the lockfile using compatible dependency updates, raised the direct minimum versions, and aligned the Next.js ESLint configuration with Next.js. React remains on 18 and Prisma remains on 5; no database migration is involved.
+
+| Dependency | Previous version | Reviewed resolution |
+| --- | --- | --- |
+| Next.js / eslint-config-next | 16.2.10 | 16.3.4 |
+| next-auth | 4.24.14 | 4.24.15 |
+| PostCSS | 8.5.19 | 8.5.28 |
+| brace-expansion | 1.1.14 / 5.0.6 | 1.1.18 / 5.0.9 |
+| Browserslist | 4.28.6 | 4.28.9 |
+| js-yaml | 4.3.0 | 4.3.2 |
+| nanoid | 3.3.12 | 3.3.18 |
+| postcss-selector-parser | 6.1.2 | 6.1.4 |
+| sharp | 0.34.5 | 0.35.4 |
+
+The published [Next.js proxy advisory](https://github.com/advisories/GHSA-6gpp-xcg3-4w24) and [Auth.js cookie-binding advisory](https://github.com/advisories/GHSA-x445-f3h2-j279) were checked alongside the live npm audit report. The report covers additional advisories too; the complete updated dependency graph was audited, not only these two packages. An installed vulnerable package does not by itself prove that every listed exploit is reachable in this application's configuration.
+
+**Verification:** performed in a separate clean Git worktree on Node 22, without copying application secrets or changing the running app's installed dependencies. `npm ci` (including Prisma generation), the exact CI command `npm audit --audit-level=moderate`, all 166 tests, `npm run typecheck`, and the full `npm run build` passed. Audit reports **zero vulnerabilities**. `npm run lint` exited successfully with two non-blocking navigation warnings from the newer Next.js rules (`new-request/page.tsx:380` and `requests/page.tsx:708`). The production build retains the previously documented dynamic attachment-path tracing warning, now precisely located at `api/pmac/attachments/route.ts:200`. Those warnings are separate from the dependency audit and were not suppressed.
+
+**Local rollout:** after reviewing/pulling this change, stop the development server, run `npm ci`, and restart it. The current running workspace intentionally retains its old installed packages until that restart/install; the committed lockfile and clean verification worktree contain the corrected dependency graph. GitHub CI must still run on the pushed commit.

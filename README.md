@@ -26,7 +26,7 @@ A Next.js App Router application for managing CMAC and PMAC documentation reques
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22 (matches CI and Docker; Next.js requires at least 20.9)
 - npm
 - MySQL database
 - ClamAV scanner for file uploads
