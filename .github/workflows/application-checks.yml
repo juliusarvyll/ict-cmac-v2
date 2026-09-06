@@ -25,25 +25,26 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
-  mysql-concurrency:
+  postgres-concurrency:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
-      mysql:
-        image: mysql:8.0
+      postgres:
+        image: postgres:17
         env:
-          MYSQL_ROOT_PASSWORD: ci-only-ephemeral
-          MYSQL_DATABASE: pmac_concurrency
+          POSTGRES_PASSWORD: ci-only-ephemeral
+          POSTGRES_DB: pmac_concurrency
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd="mysqladmin ping -h localhost --silent"
+          --health-cmd="pg_isready -U postgres -d pmac_concurrency"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
     env:
       # Throwaway service credentials, never application or production secrets.
-      DATABASE_URL: mysql://root:ci-only-ephemeral@127.0.0.1:3306/pmac_concurrency
+      DATABASE_URL: postgresql://postgres:ci-only-ephemeral@127.0.0.1:5432/pmac_concurrency
+      DIRECT_URL: postgresql://postgres:ci-only-ephemeral@127.0.0.1:5432/pmac_concurrency
       PMAC_CONCURRENCY_TESTS: '1'
     steps:
       - uses: actions/checkout@v6
@@ -53,5 +54,44 @@ jobs:
           cache: npm
       - run: npm ci
       # Schema provisioning is permitted only for this job's disposable service.
-      - run: npx prisma db push --skip-generate
+      - run: npm run db:migrate
       - run: npm run test:concurrency
+
+  database-transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only-ephemeral
+          MYSQL_DATABASE: pmac_transfer_source
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost --silent"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-only-ephemeral
+          POSTGRES_DB: pmac_transfer_target
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres -d pmac_transfer_target"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      MYSQL_SOURCE_URL: mysql://root:ci-only-ephemeral@127.0.0.1:3306/pmac_transfer_source
+      DATABASE_URL: postgresql://postgres:ci-only-ephemeral@127.0.0.1:5432/pmac_transfer_target
+      DIRECT_URL: postgresql://postgres:ci-only-ephemeral@127.0.0.1:5432/pmac_transfer_target
+      POSTGRES_TARGET_URL: postgresql://postgres:ci-only-ephemeral@127.0.0.1:5432/pmac_transfer_target
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run db:migration-source-client
+      - run: npx prisma db push --schema prisma/legacy-mysql.prisma --skip-generate
+      - run: npm run db:migrate
+      - run: npx tsx scripts/verifyDatabaseTransfer.ts

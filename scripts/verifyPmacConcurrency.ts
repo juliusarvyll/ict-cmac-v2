@@ -13,10 +13,10 @@ async function main() {
     throw new Error('Set PMAC_CONCURRENCY_TESTS=1 to permit temporary fixtures in a local development database.')
   }
   const connection = process.env.PMAC_TEST_DATABASE_URL || process.env.DATABASE_URL
-  if (!connection) throw new Error('A local MySQL database URL is required.')
+  if (!connection) throw new Error('A local PostgreSQL database URL is required.')
   const url = new URL(connection)
-  if (url.protocol !== 'mysql:' || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
-    throw new Error('Concurrency tests only permit loopback MySQL databases; remote databases are refused.')
+  if (!['postgres:', 'postgresql:'].includes(url.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
+    throw new Error('Concurrency tests only permit loopback PostgreSQL databases; remote databases are refused.')
   }
   // Both transaction callbacks must acquire separate connections before racing.
   url.searchParams.set('connection_limit', '5')

@@ -164,10 +164,10 @@ function buildPmacActivityFilterWhere(options: PmacActivityFeedOptions): Prisma.
     ...(query
       ? {
           OR: [
-            { summary: { contains: query } },
-            { details: { contains: query } },
-            { actorName: { contains: query } },
-            { action: { contains: query } },
+            { summary: { contains: query, mode: 'insensitive' } },
+            { details: { contains: query, mode: 'insensitive' } },
+            { actorName: { contains: query, mode: 'insensitive' } },
+            { action: { contains: query, mode: 'insensitive' } },
           ],
         }
       : {}),

@@ -1,14 +1,15 @@
+// Frozen pre-PostgreSQL schema, used only by the read-only migration source client.
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/mysql-migration-client"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "mysql"
+  url      = env("MYSQL_SOURCE_URL")
 }
 
 enum Role {
@@ -594,7 +595,7 @@ model RequestLetterAttachment {
   fileName     String
   mimeType     String
   sizeBytes    Int
-  data         Bytes           @db.ByteA
+  data         Bytes           @db.LongBlob
   createdAt    DateTime        @default(now())
 
   @@index([uploadedById, createdAt])
@@ -625,3 +626,4 @@ model NotificationReceipt {
   @@unique([userId, notificationId])
   @@index([userId, readAt])
 }
+
