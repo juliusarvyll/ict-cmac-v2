@@ -371,9 +371,9 @@ function formatCoreNotification(
   })
 }
 
-async function getCoreNotificationFeed(user: SessionUser, limit: number) {
+async function getCoreNotificationFeed(user: SessionUser) {
   const logs = await prisma.auditLog.findMany({
-    where: buildCoreNotificationWhere(user),
+    where: { AND: [buildCoreNotificationWhere(user), { createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }] },
     select: {
       id: true,
       action: true,
@@ -390,7 +390,6 @@ async function getCoreNotificationFeed(user: SessionUser, limit: number) {
       },
     },
     orderBy: { createdAt: 'desc' },
-    take: limit,
   })
 
   return logs.map((log) => formatCoreNotification(user, log))
@@ -421,7 +420,7 @@ function getPmacProjectNotificationWhere(user: SessionUser): Prisma.PmacProjectW
   }
 }
 
-async function getPmacNotificationFeed(user: SessionUser, limit: number) {
+async function getPmacNotificationFeed(user: SessionUser) {
   if (!hasPmacV4Delegates()) {
     return []
   }
@@ -447,7 +446,6 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
           orderBy: {
             submittedAt: 'desc',
           },
-          take: 3,
         })
       : Promise.resolve([]),
     user.pmacMemberId
@@ -478,7 +476,6 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
               startDateTime: 'asc',
             },
           },
-          take: 8,
         })
       : Promise.resolve([]),
     user.role === 'PMAC_SECRETARY'
@@ -503,7 +500,6 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
             },
           },
           orderBy: { respondedAt: 'desc' },
-          take: 8,
         })
       : Promise.resolve([]),
     isPmacSystemRole(user.role)
@@ -530,7 +526,6 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
           orderBy: {
             closesAt: 'asc',
           },
-          take: 2,
         })
       : Promise.resolve([]),
     activityWhere
@@ -548,7 +543,6 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
           orderBy: {
             createdAt: 'desc',
           },
-          take: 2,
         })
       : Promise.resolve([]),
     user.role === 'CMAC_COORDINATOR' || isPmacStaffingManagerRole(user.role)
@@ -584,7 +578,6 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
           orderBy: {
             startDateTime: 'asc',
           },
-          take: 8,
         })
       : Promise.resolve([]),
     isPmacAttendanceManagerRole(user.role) || isPmacEventManagerRole(user.role)
@@ -626,7 +619,6 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
           orderBy: {
             startDateTime: 'desc',
           },
-          take: 8,
         })
       : Promise.resolve([]),
     projectWhere
@@ -659,7 +651,6 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
           orderBy: {
             createdAt: 'desc',
           },
-          take: 4,
         })
       : Promise.resolve([]),
   ])
@@ -852,7 +843,6 @@ async function getPmacNotificationFeed(user: SessionUser, limit: number) {
 
       return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
     })
-    .slice(0, limit)
 }
 
 async function applyReadState(userId: string, notifications: AppNotification[]) {
@@ -930,11 +920,10 @@ export async function markNotificationsRead(userId: string, notifications: Array
   )
 }
 
-export async function getNotificationFeed(user: SessionUser, limit = 8): Promise<AppNotification[]> {
-  const candidateLimit = Math.max(limit * 3, limit)
+export async function getCompleteNotificationFeed(user: SessionUser): Promise<AppNotification[]> {
   const [coreNotifications, pmacNotifications] = await Promise.all([
-    isCoreWorkflowRole(user.role) ? getCoreNotificationFeed(user, candidateLimit) : Promise.resolve([]),
-    (isPmacSystemRole(user.role) || user.role === 'CMAC_COORDINATOR') ? getPmacNotificationFeed(user, candidateLimit) : Promise.resolve([]),
+    isCoreWorkflowRole(user.role) ? getCoreNotificationFeed(user) : Promise.resolve([]),
+    (isPmacSystemRole(user.role) || user.role === 'CMAC_COORDINATOR') ? getPmacNotificationFeed(user) : Promise.resolve([]),
   ])
 
   const candidates = await applyReadState(user.id, [...coreNotifications, ...pmacNotifications])
@@ -947,7 +936,19 @@ export async function getNotificationFeed(user: SessionUser, limit = 8): Promise
         return priorityDelta
       }
 
-      return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+      return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() || left.id.localeCompare(right.id)
     })
-    .slice(0, limit)
+}
+
+export async function getNotificationFeed(user: SessionUser, limit = 8): Promise<AppNotification[]> {
+  return (await getCompleteNotificationFeed(user)).slice(0, limit)
+}
+
+export async function getNotificationPage(user: SessionUser, page = 1, includeRead = false) {
+  const feed = await getCompleteNotificationFeed(user)
+  const unreadCount = feed.filter(item => !item.isRead).length
+  const visible = includeRead ? feed : feed.filter(item => !item.isRead)
+  const totalPages = Math.max(1, Math.ceil(visible.length / 10))
+  const currentPage = Math.min(totalPages, Math.max(1, Number.isFinite(page) ? Math.floor(page) : 1))
+  return { items: visible.slice((currentPage - 1) * 10, currentPage * 10), unreadCount, page: currentPage, totalPages }
 }
