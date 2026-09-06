@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { PMAC_UPLOAD_ROOT, resolvePmacAttachmentPath } from '@/lib/pmacAttachmentStorage'
 import { mkdir, unlink, writeFile } from 'fs/promises'
 import path from 'path'
 
@@ -17,7 +18,7 @@ import { sanitizeMultilineText, sanitizeSingleLineText } from '@/lib/sanitizatio
 
 export const runtime = 'nodejs'
 
-const UPLOAD_ROOT = path.join(process.cwd(), 'public', 'uploads', 'pmac')
+const UPLOAD_ROOT = PMAC_UPLOAD_ROOT
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024
 const ALLOWED_UPLOAD_TYPES = {
   'application/pdf': {
@@ -82,6 +83,7 @@ async function ensureAttachmentAccess(
   targetType: 'event' | 'poll' | 'member',
   targetId: string
 ) {
+  if (!['event', 'poll', 'member'].includes(targetType)) throw new Error('Invalid attachment target type.')
   if (targetType === 'event') {
     const event = await prisma.pmacEvent.findUnique({
       where: { id: targetId },
@@ -133,7 +135,7 @@ async function ensureAttachmentAccess(
 }
 
 async function removeStoredFile(filePath: string) {
-  const absolutePath = path.join(process.cwd(), 'public', filePath.replace(/^\/+/, ''))
+  const absolutePath = resolvePmacAttachmentPath(filePath)
 
   try {
     await unlink(absolutePath)
@@ -143,6 +145,7 @@ async function removeStoredFile(filePath: string) {
 }
 
 export async function POST(request: NextRequest) {
+  let pendingFile: string | null = null
   try {
     assertSameOriginMutation(request)
     const session = await assertActionAccess([...PMAC_POLL_MANAGER_ROLES], {
@@ -195,7 +198,7 @@ export async function POST(request: NextRequest) {
     const storedName = `${randomUUID()}${extension}`
     const directory = path.join(UPLOAD_ROOT, monthFolder)
     const absolutePath = path.join(directory, storedName)
-    const filePath = `/uploads/pmac/${monthFolder}/${storedName}`
+    const filePath = `/private/uploads/pmac/${monthFolder}/${storedName}`
     const bytes = Buffer.from(await file.arrayBuffer())
 
     if (!hasAllowedFileSignature(bytes, file.type as AllowedUploadMimeType)) {
@@ -205,6 +208,7 @@ export async function POST(request: NextRequest) {
     await scanUploadedFile(bytes)
     await mkdir(directory, { recursive: true })
     await writeFile(absolutePath, bytes)
+    pendingFile = filePath
 
     const attachment = await prisma.$transaction(async (tx) => {
       const createdAttachment = await tx.pmacAttachment.create({
@@ -246,8 +250,10 @@ export async function POST(request: NextRequest) {
       return createdAttachment
     })
 
+    pendingFile = null
     return NextResponse.json({ attachment })
   } catch (error) {
+    if (pendingFile) await removeStoredFile(pendingFile)
     const message = error instanceof Error ? error.message : 'Unable to upload PMAC attachment.'
     const status =
       error instanceof MalwareDetectedError

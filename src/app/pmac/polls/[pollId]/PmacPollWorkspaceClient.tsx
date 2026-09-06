@@ -465,7 +465,7 @@ export default function PmacPollWorkspaceClient({ pollId }: { pollId: string }) 
                   <div key={attachment.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <a href={attachment.filePath} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+                        <a href={`/api/pmac/attachments/download?id=${encodeURIComponent(attachment.id)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800">
                           <Paperclip size={14} />
                           {attachment.fileName}
                         </a>

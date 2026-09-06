@@ -11,6 +11,13 @@ export default withAuth(
     const role = typeof token?.role === "string" ? token.role : null;
     const homePath = getHomePathForRole(role);
 
+    // Preserve old links without allowing public storage to bypass record access.
+    if (path.startsWith('/uploads/pmac/')) {
+      const download = new URL('/api/pmac/attachments/download', req.url);
+      download.searchParams.set('legacyPath', path);
+      return NextResponse.rewrite(download);
+    }
+
     // Redirect to home if already logged in and trying to access signin
     if (path.startsWith("/auth/signin") && token) {
       return NextResponse.redirect(new URL(homePath, req.url));
