@@ -99,6 +99,8 @@ The published [Next.js proxy advisory](https://github.com/advisories/GHSA-6gpp-x
 
 ## PR #15 validation follow-up
 
+For the subsequent deployment diagnosis, expanded lifecycle concurrency checks and remaining owner setup, see [deployment readiness](deployment-readiness.md). That checklist supersedes earlier statements below about unavailable Vercel logs and untested lifecycle races.
+
 The security changes landed after PR #14's merge, so they are being reviewed separately in [PR #15](https://github.com/justNyarks/ict-cmac-v2/pull/15). The branch remains unmerged for owner review. Installed local Next.js and NextAuth now match the updated dependency versions.
 
 ### Changes and short review

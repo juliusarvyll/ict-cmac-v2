@@ -130,7 +130,7 @@ After deploying the CMAC-to-PMAC fulfillment workflow for the first time, reconc
 npm run backfill:pmac-handoffs
 ```
 
-Vercel uses the build command in `vercel.json` to apply additive Prisma schema updates before creating the Next.js build. Ensure `DATABASE_URL` is configured for every Vercel environment that can deploy this application.
+Vercel's build command only generates Prisma Client and builds Next.js. It deliberately does **not** push the schema or seed a database. Apply reviewed schema changes separately after taking a backup. Configure a hosted MySQL `DATABASE_URL` in each environment; Preview must use a separate database and credentials from Production. A successful build alone does not verify database connectivity. See [deployment readiness](docs/deployment-readiness.md).
 
 ### Malware scanner deployment
 
