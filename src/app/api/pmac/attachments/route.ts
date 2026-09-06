@@ -197,7 +197,8 @@ export async function POST(request: NextRequest) {
     const extension = allowedUploadType.storedExtension
     const storedName = `${randomUUID()}${extension}`
     const directory = path.join(UPLOAD_ROOT, monthFolder)
-    const absolutePath = path.join(directory, storedName)
+    // These files are created at runtime and are not deployment build inputs.
+    const absolutePath = path.join(/* turbopackIgnore: true */ directory, storedName)
     const filePath = `/private/uploads/pmac/${monthFolder}/${storedName}`
     const bytes = Buffer.from(await file.arrayBuffer())
 
