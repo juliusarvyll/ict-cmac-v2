@@ -15,3 +15,4 @@ coverage
 out
 build
 *.tsbuildinfo
+private/uploads

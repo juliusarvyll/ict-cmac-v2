@@ -80,6 +80,14 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+### PMAC file storage and workflow review
+
+PMAC uploads now live in `private/uploads/pmac`, outside the public web root. Back up this directory alongside the database. Docker Compose persists new uploads in the `ict-cmac-pmac-uploads` volume. Upload files are excluded from Git and Docker build context.
+
+Existing `/uploads/pmac/...` links are handled by the Next.js proxy and an authenticated, record-scoped download route; historical files are not moved or deleted. Do not configure a reverse proxy/CDN to serve that directory directly, bypassing Next.js. Preserve existing `public/uploads/pmac` files when deploying an upgrade, and include them in backups until migrated separately.
+
+See [the implementation checklist and review](docs/workflow-hardening-review.md) for the changes, causes, tests, and manual acceptance checks.
+
 ## Available Scripts
 
 - `npm run dev` - start the dev server
