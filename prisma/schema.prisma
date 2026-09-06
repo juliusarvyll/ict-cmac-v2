@@ -57,6 +57,7 @@ enum PmacEventStatus {
   PENDING_APPROVAL
   APPROVED
   REJECTED
+  CANCELLED
   COMPLETED
 }
 
@@ -179,6 +180,17 @@ enum RequestStatus {
   ARCHIVED
 }
 
+enum PmacFulfillmentStatus {
+  NOT_APPLICABLE
+  RELEASED
+  ACKNOWLEDGED
+  STAFFING
+  READY
+  EVENT_COMPLETED
+  DELIVERED
+  CANCELLED
+}
+
 model User {
   id                 String      @id @default(cuid())
   name               String?
@@ -196,19 +208,20 @@ model User {
   submittedRequests ServiceRequest[] @relation("SubmittedBy")
 
   // Requests reviewed by this user (if Coordinator or Director)
-  coordinatorReviews         ServiceRequest[]        @relation("Coordinator")
-  directorReviews            ServiceRequest[]        @relation("Director")
-  createdPmacEvents          PmacEvent[]             @relation("PmacEventCreatedBy")
-  approvedPmacEvents         PmacEvent[]             @relation("PmacEventApprovedBy")
-  assignedPmacEventDuties    PmacEventAssignment[]   @relation("PmacEventAssignmentAssignedBy")
-  recordedPmacAttendance     PmacAttendance[]        @relation("PmacAttendanceRecordedBy")
-  createdPmacPolls           PmacPoll[]              @relation("PmacPollCreatedBy")
-  launchedPmacProjects       PmacProject[]           @relation("PmacProjectLaunchedBy")
-  addedPmacProjectLinks      PmacProjectLink[]       @relation("PmacProjectLinkAddedBy")
-  assignedPmacProjectMembers PmacProjectAssignment[] @relation("PmacProjectAssignmentAssignedBy")
-  castPmacVotes              PmacVote[]              @relation("PmacVoteCastBy")
-  pmacActivityLogs           PmacActivityLog[]       @relation("PmacActivityActor")
-  uploadedPmacAttachments    PmacAttachment[]        @relation("PmacAttachmentUploadedBy")
+  coordinatorReviews         ServiceRequest[]          @relation("Coordinator")
+  directorReviews            ServiceRequest[]          @relation("Director")
+  createdPmacEvents          PmacEvent[]               @relation("PmacEventCreatedBy")
+  approvedPmacEvents         PmacEvent[]               @relation("PmacEventApprovedBy")
+  acknowledgedPmacHandoffs   PmacEvent[]               @relation("PmacEventHandoffAcknowledgedBy")
+  assignedPmacEventDuties    PmacEventAssignment[]     @relation("PmacEventAssignmentAssignedBy")
+  recordedPmacAttendance     PmacAttendance[]          @relation("PmacAttendanceRecordedBy")
+  createdPmacPolls           PmacPoll[]                @relation("PmacPollCreatedBy")
+  launchedPmacProjects       PmacProject[]             @relation("PmacProjectLaunchedBy")
+  addedPmacProjectLinks      PmacProjectLink[]         @relation("PmacProjectLinkAddedBy")
+  assignedPmacProjectMembers PmacProjectAssignment[]   @relation("PmacProjectAssignmentAssignedBy")
+  castPmacVotes              PmacVote[]                @relation("PmacVoteCastBy")
+  pmacActivityLogs           PmacActivityLog[]         @relation("PmacActivityActor")
+  uploadedPmacAttachments    PmacAttachment[]          @relation("PmacAttachmentUploadedBy")
   uploadedRequestLetters     RequestLetterAttachment[] @relation("RequestLetterUploadedBy")
   notificationReceipts       NotificationReceipt[]
 
@@ -341,10 +354,16 @@ model PmacEvent {
   status                  PmacEventStatus       @default(DRAFT)
   sourceType              PmacEventSourceType   @default(MANUAL)
   sourceRequestId         String?               @unique
+  sourceRequest           ServiceRequest?       @relation("PmacEventSourceRequest", fields: [sourceRequestId], references: [id], onDelete: SetNull)
   sourceLabel             String?
   sourceSchool            School?
   sourceDocumentationType DocumentationType?
   sourceCampusType        CampusType?
+  sourceNeedsSameDayEdit  Boolean               @default(false)
+  sourceNeedsSameDayPhoto Boolean               @default(false)
+  handoffAcknowledgedAt   DateTime?
+  handoffAcknowledgedById String?
+  handoffAcknowledgedBy   User?                 @relation("PmacEventHandoffAcknowledgedBy", fields: [handoffAcknowledgedById], references: [id], onDelete: SetNull)
   createdById             String
   createdBy               User                  @relation("PmacEventCreatedBy", fields: [createdById], references: [id])
   approvedById            String?
@@ -546,16 +565,20 @@ model ServiceRequest {
   coordinatorId         String?
   coordinatorApprovedAt DateTime?
 
-  director           User?     @relation("Director", fields: [directorId], references: [id])
-  directorId         String?
-  directorApprovedAt DateTime?
-  deletedAt          DateTime?
-  archivedAt         DateTime?
+  director                 User?                 @relation("Director", fields: [directorId], references: [id])
+  directorId               String?
+  directorApprovedAt       DateTime?
+  deletedAt                DateTime?
+  archivedAt               DateTime?
+  pmacFulfillmentStatus    PmacFulfillmentStatus @default(NOT_APPLICABLE)
+  pmacFulfillmentUpdatedAt DateTime?
+  pmacFulfilledAt          DateTime?
 
-  logs      AuditLog[]
+  logs             AuditLog[]
+  pmacEvent        PmacEvent?               @relation("PmacEventSourceRequest")
   letterAttachment RequestLetterAttachment?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
 
   @@index([status, deletedAt, eventDate])
   @@index([secretaryId, status, createdAt])

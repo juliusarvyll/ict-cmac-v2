@@ -17,6 +17,7 @@ export interface RequestInput {
   letterUrl?: string | null
   letterAttachmentId?: string | null
   letterContent?: string | null
+  eventDetails?: string | null
   needsSameDayEdit?: boolean
   needsSameDayPhoto?: boolean
   campusType?: CampusType
@@ -36,6 +37,7 @@ export interface NormalizedRequestInput {
   letterUrl: string | null
   letterAttachmentId: string | null
   letterContent: string | null
+  eventDetails: string | null
   needsSameDayEdit: boolean
   needsSameDayPhoto: boolean
   campusType: CampusType
@@ -362,6 +364,10 @@ export function validateAndNormalizeRequestInput(
     letterContent: sanitizeMultilineText(formData.letterContent, {
       fieldName: "Request letter",
       maxLength: 10000,
+    }) || null,
+    eventDetails: sanitizeMultilineText(formData.eventDetails, {
+      fieldName: 'Coverage instructions',
+      maxLength: 4000,
     }) || null,
     needsSameDayEdit: Boolean(formData.needsSameDayEdit),
     needsSameDayPhoto: Boolean(formData.needsSameDayPhoto),

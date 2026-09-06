@@ -58,3 +58,13 @@ export async function runWithReverification<T>(
     return await operation()
   }
 }
+
+// For form actions that return structured errors, also convert cancellation/network
+// failures into that same result shape so the form can keep the user's input.
+export async function runReverifiedAction<T extends { success: boolean; error?: string }>(operation: () => Promise<T>) {
+  try {
+    return await runWithReverification(operation, result => result.error)
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : 'Unable to save. Please try again.' }
+  }
+}

@@ -12,7 +12,7 @@ import { PMAC_CLUB_ROLE_LABELS } from '@/lib/roles'
 type AttendanceBoard = Awaited<ReturnType<typeof getPmacAttendanceBoard>>
 type AttendanceEvent = AttendanceBoard[number]
 type AttendanceStatus = (typeof PMAC_ATTENDANCE_STATUSES)[number]
-type EventAttendanceState = Record<string, Record<string, { status: AttendanceStatus; notes: string }>>
+type EventAttendanceState = Record<string, Record<string, { status: AttendanceStatus | null; notes: string }>>
 
 type AttendanceMember = {
   id: string
@@ -68,11 +68,12 @@ function buildInitialState(events: AttendanceBoard): EventAttendanceState {
 
   for (const event of events) {
     state[event.id] = Object.fromEntries(getEventMembers(event).map(member => [member.id, {
-      status: 'PRESENT' as const,
+      status: null,
       notes: '',
     }]))
 
     for (const record of event.attendance) {
+      if (!state[event.id][record.member.id]) continue
       state[event.id][record.member.id] = {
         status: record.status,
         notes: record.notes || '',
@@ -87,7 +88,7 @@ export default function PmacAttendancePageClient() {
   const [events, setEvents] = useState<AttendanceBoard>([])
   const [attendanceState, setAttendanceState] = useState<EventAttendanceState>({})
   const [query, setQuery] = useState('')
-  const [view, setView] = useState<'ALL' | 'PENDING' | 'RECORDED'>('ALL')
+  const [view, setView] = useState<'ALL' | 'PENDING' | 'RECORDED'>('PENDING')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [savingEventId, setSavingEventId] = useState<string | null>(null)
@@ -135,13 +136,13 @@ export default function PmacAttendancePageClient() {
   const totalAssignedMembers = events.reduce((total, event) => total + getEventMembers(event).length, 0)
   const totalAttendanceRecords = events.reduce((total, event) => total + getRecordedMemberCount(event), 0)
 
-  function updateMember(eventId: string, memberId: string, update: Partial<{ status: AttendanceStatus; notes: string }>) {
+  function updateMember(eventId: string, memberId: string, update: Partial<{ status: AttendanceStatus | null; notes: string }>) {
     setAttendanceState(previous => ({
       ...previous,
       [eventId]: {
         ...previous[eventId],
         [memberId]: {
-          status: previous[eventId]?.[memberId]?.status ?? 'PRESENT',
+          status: previous[eventId]?.[memberId]?.status ?? null,
           notes: previous[eventId]?.[memberId]?.notes ?? '',
           ...update,
         },
@@ -150,13 +151,22 @@ export default function PmacAttendancePageClient() {
   }
 
   function saveEvent(event: AttendanceEvent, members: AttendanceMember[]) {
+    const unmarkedMembers = members.filter(member => !attendanceState[event.id]?.[member.id]?.status)
+    if (unmarkedMembers.length) {
+      setToast({
+        type: 'error',
+        message: `Select an attendance status for ${unmarkedMembers.length} confirmed member(s) before saving.`,
+      })
+      return
+    }
+
     setSavingEventId(event.id)
     startTransition(async () => {
       try {
         const result = await savePmacAttendance(members.map(member => ({
           eventId: event.id,
           memberId: member.id,
-          status: attendanceState[event.id]?.[member.id]?.status ?? 'PRESENT',
+          status: attendanceState[event.id]![member.id].status!,
           notes: attendanceState[event.id]?.[member.id]?.notes ?? '',
         })))
 
@@ -205,7 +215,7 @@ export default function PmacAttendancePageClient() {
       <header className="space-y-1">
         <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">PMAC Attendance</p>
         <h2 className="font-display text-2xl font-bold text-slate-800">Attendance Board</h2>
-        <p className="text-sm text-slate-500">Record attendance once for each assigned member, even when they have multiple duties.</p>
+        <p className="text-sm text-slate-500">Record attendance once for each member who confirmed coverage, even when they have multiple duties.</p>
       </header>
 
       <section className="card p-4" aria-label="Attendance summary and filters">
@@ -214,7 +224,7 @@ export default function PmacAttendancePageClient() {
             <Users size={18} className="text-emerald-700" />
             <div><p className="text-xs text-slate-400">Staffed events</p><p className="font-bold text-slate-800">{events.length}</p></div>
           </div>
-          <div><p className="text-xs text-slate-400">Assigned members</p><p className="font-bold text-slate-800">{totalAssignedMembers}</p></div>
+          <div><p className="text-xs text-slate-400">Confirmed members</p><p className="font-bold text-slate-800">{totalAssignedMembers}</p></div>
           <div><p className="text-xs text-slate-400">Recorded</p><p className="font-bold text-slate-800">{totalAttendanceRecords}/{totalAssignedMembers}</p></div>
         </div>
         <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 md:grid-cols-[minmax(0,1fr)_180px]">
@@ -253,6 +263,7 @@ export default function PmacAttendancePageClient() {
             const memberStates = attendanceState[event.id] || {}
             const recorded = getRecordedMemberCount(event)
             const isSaving = savingEventId === event.id
+            const unmarkedCount = members.filter(member => !memberStates[member.id]?.status).length
 
             return (
               <section key={event.id} className="card overflow-hidden" aria-labelledby={`attendance-${event.id}`}>
@@ -269,7 +280,7 @@ export default function PmacAttendancePageClient() {
 
                 <div className="divide-y divide-slate-100">
                   {members.map(member => {
-                    const current = memberStates[member.id] ?? { status: 'PRESENT' as const, notes: '' }
+                    const current = memberStates[member.id] ?? { status: null, notes: '' }
                     return (
                       <div key={member.id} className="grid gap-3 px-5 py-4 lg:grid-cols-[minmax(180px,1fr)_minmax(340px,1.5fr)_minmax(180px,1fr)] lg:items-center">
                         <div className="min-w-0">
@@ -310,9 +321,14 @@ export default function PmacAttendancePageClient() {
                 </div>
 
                 <div className="flex justify-end border-t border-slate-100 bg-slate-50/60 px-5 py-3">
+                  {unmarkedCount ? (
+                    <p className="mr-auto self-center text-xs font-medium text-amber-700">
+                      {unmarkedCount} member(s) still need a status.
+                    </p>
+                  ) : null}
                   <button
                     type="button"
-                    disabled={savingEventId !== null}
+                    disabled={savingEventId !== null || unmarkedCount > 0}
                     onClick={() => saveEvent(event, members)}
                     className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-60"
                   >
@@ -327,7 +343,7 @@ export default function PmacAttendancePageClient() {
       ) : (
         <div className="card space-y-2 p-8 text-center">
           <h3 className="text-lg font-bold text-slate-800">No staffed events found</h3>
-          <p className="text-sm text-slate-500">Adjust the filters or assign members to an approved PMAC event first.</p>
+          <p className="text-sm text-slate-500">Adjust the filters, wait for the event to begin, or confirm member assignments first.</p>
         </div>
       )}
     </div>

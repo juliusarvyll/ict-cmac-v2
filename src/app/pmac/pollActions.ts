@@ -1,14 +1,24 @@
 'use server'
 
 import { unstable_noStore as noStore } from 'next/cache'
-import { isPmacPollVoterRole, PMAC_POLL_CREATOR_ROLES, PMAC_POLL_VOTER_ROLES, PMAC_VOTE_CHOICES } from '@/lib/pmac'
+import { canClosePmacPoll, isPmacPollVoterRole, PMAC_POLL_CREATOR_ROLES, PMAC_POLL_MANAGER_ROLES, PMAC_POLL_VOTER_ROLES, PMAC_VOTE_CHOICES } from '@/lib/pmac'
 import { recordPmacActivity } from '@/lib/pmacActivity'
 import { prisma } from '@/lib/prisma'
 import { revalidatePmacViews } from '@/lib/pmacRevalidation'
 import { sanitizeSingleLineText } from '@/lib/sanitization'
 
-import { ensurePollPayload, isPollOpenForVoting, canViewPollResults, getViewerSession, assertPmacActionSession, getActivityActor, countEligiblePmacVoters, getPmacPollWhere, findPmacPollForUser, buildPollWorkspacePermissions } from './actionShared'
+import { ensurePollPayload, isPollOpenForVoting, canViewPollResults, getEffectivePollStatus, isDuplicatePmacVoteError, getViewerSession, assertPmacActionSession, getActivityActor, countEligiblePmacVoters, getPmacPollWhere, findPmacPollForUser, buildPollWorkspacePermissions } from './actionShared'
 import type { PmacVoteChoice, PmacPollPayload } from './actionShared'
+
+async function closeExpiredPmacPolls(now = new Date()) {
+  await prisma.pmacPoll.updateMany({
+    where: {
+      status: 'OPEN',
+      closesAt: { lte: now },
+    },
+    data: { status: 'CLOSED' },
+  })
+}
 
 export async function getPmacPolls() {
   noStore()
@@ -17,6 +27,8 @@ export async function getPmacPolls() {
   if (!session) {
     return []
   }
+
+  await closeExpiredPmacPolls()
 
   const [polls, totalEligibleVoters] = await Promise.all([
     prisma.pmacPoll.findMany({
@@ -79,6 +91,7 @@ export async function getPmacPolls() {
 
     return {
       ...poll,
+      status: getEffectivePollStatus(poll, now),
       viewerVote,
       votesCast,
       totalEligibleVoters,
@@ -97,6 +110,8 @@ export async function getPmacPollWorkspace(pollId: string) {
   if (!session) {
     return null
   }
+
+  await closeExpiredPmacPolls()
 
   const sanitizedId = sanitizeSingleLineText(pollId, {
     fieldName: 'Poll ID',
@@ -140,8 +155,10 @@ export async function getPmacPollWorkspace(pollId: string) {
   return {
     poll: {
       ...poll,
+      status: getEffectivePollStatus(poll, now),
       attachments: 'attachments' in poll && Array.isArray(poll.attachments) ? poll.attachments : [],
-      activityLogs: 'activityLogs' in poll && Array.isArray(poll.activityLogs) ? poll.activityLogs : [],
+      activityLogs: 'activityLogs' in poll && Array.isArray(poll.activityLogs)
+        ? poll.activityLogs.filter((entry) => entry.action !== 'VOTE_CAST') : [],
       votes: permissions.canViewResults ? poll.votes : [],
     },
     voteSummary: permissions.canViewResults ? voteSummary : null,
@@ -162,7 +179,7 @@ export async function getPmacPollWorkspace(pollId: string) {
 
 export async function createPmacPoll(payload: PmacPollPayload) {
   try {
-    const session = await assertPmacActionSession(PMAC_POLL_CREATOR_ROLES)
+    const session = await assertPmacActionSession(PMAC_POLL_CREATOR_ROLES, { zeroTrust: false })
     const data = ensurePollPayload(payload)
 
     if (data.linkedEventId) {
@@ -206,7 +223,7 @@ export async function createPmacPoll(payload: PmacPollPayload) {
 
 export async function updatePmacPoll(payload: PmacPollPayload) {
   try {
-    const session = await assertPmacActionSession(['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'CMAC_COORDINATOR'])
+    const session = await assertPmacActionSession(PMAC_POLL_MANAGER_ROLES, { zeroTrust: false })
     const pollId = sanitizeSingleLineText(payload.pollId, {
       fieldName: 'Poll ID',
       maxLength: 191,
@@ -267,7 +284,7 @@ export async function updatePmacPoll(payload: PmacPollPayload) {
 
 export async function openPmacPoll(pollId: string) {
   try {
-    const session = await assertPmacActionSession(['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'CMAC_COORDINATOR'])
+    const session = await assertPmacActionSession(PMAC_POLL_MANAGER_ROLES, { zeroTrust: false })
     const sanitizedId = sanitizeSingleLineText(pollId, {
       fieldName: 'Poll ID',
       maxLength: 191,
@@ -327,7 +344,7 @@ export async function openPmacPoll(pollId: string) {
 
 export async function closePmacPoll(pollId: string) {
   try {
-    const session = await assertPmacActionSession(['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'CMAC_COORDINATOR'])
+    const session = await assertPmacActionSession(PMAC_POLL_MANAGER_ROLES, { zeroTrust: false })
     const sanitizedId = sanitizeSingleLineText(pollId, {
       fieldName: 'Poll ID',
       maxLength: 191,
@@ -339,11 +356,16 @@ export async function closePmacPoll(pollId: string) {
       select: {
         id: true,
         status: true,
+        createdById: true,
       },
     })
 
     if (!poll) {
       return { success: false, error: 'PMAC poll not found.' }
+    }
+
+    if (!canClosePmacPoll(session.user.role, session.user.id, poll.createdById)) {
+      return { success: false, error: 'Only the poll creator, PMAC Director, or PMAC Secretary can close this poll.' }
     }
 
     if (poll.status !== 'OPEN') {
@@ -381,7 +403,7 @@ export async function closePmacPoll(pollId: string) {
 
 export async function archivePmacPoll(pollId: string) {
   try {
-    const session = await assertPmacActionSession(['PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'CMAC_COORDINATOR'])
+    const session = await assertPmacActionSession(PMAC_POLL_MANAGER_ROLES, { zeroTrust: false })
     const sanitizedId = sanitizeSingleLineText(pollId, {
       fieldName: 'Poll ID',
       maxLength: 191,
@@ -404,14 +426,18 @@ export async function archivePmacPoll(pollId: string) {
       return { success: false, error: 'This poll is already archived.' }
     }
 
+    if (poll.status === 'OPEN') {
+      return { success: false, error: 'Close the poll before archiving it. Only the creator, PMAC Director, or PMAC Secretary can close it.' }
+    }
+
     await prisma.$transaction(async (tx) => {
-      await tx.pmacPoll.update({
-        where: { id: sanitizedId },
+      const archived = await tx.pmacPoll.updateMany({
+        where: { id: sanitizedId, status: { in: ['DRAFT', 'CLOSED'] } },
         data: {
           status: 'ARCHIVED',
-          ...(poll.status === 'OPEN' ? { closesAt: new Date() } : {}),
         },
       })
+      if (archived.count !== 1) throw new Error('The poll changed. Refresh before archiving it.')
 
       await recordPmacActivity(tx, {
         entityType: 'POLL',
@@ -520,13 +546,16 @@ export async function castPmacVote(pollId: string, selectedOption: PmacVoteChoic
         pollId: sanitizedId,
         ...getActivityActor(session.user),
         action: 'VOTE_CAST',
-        summary: `Recorded a ${selectedOption.toLowerCase()} vote in a PMAC poll.`,
+        summary: 'Recorded a vote in a PMAC poll.',
       })
     })
 
     revalidatePmacViews([`/pmac/polls/${sanitizedId}`])
     return { success: true }
   } catch (error) {
+    if (isDuplicatePmacVoteError(error)) {
+      return { success: false, error: 'You have already voted in this poll.' }
+    }
     return { success: false, error: error instanceof Error ? error.message : 'Failed to submit PMAC vote.' }
   }
 }

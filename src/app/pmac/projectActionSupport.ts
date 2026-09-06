@@ -7,6 +7,13 @@ import { prisma } from '@/lib/prisma'
 import { sanitizeSingleLineText } from '@/lib/sanitization'
 import type { SessionUser, PmacProjectMilestoneStatusValue, PmacProjectStatusValue } from './actionShared'
 
+export const PMAC_PROJECT_CLOSURE_INVALIDATING_ACTIONS = [
+  'PROJECT_STATUS_UPDATED', 'PROJECT_HEAD_ASSIGNED', 'PROJECT_UPDATED',
+  'PROJECT_OUTPUT_SUBMITTED', 'PROJECT_LINK_ATTACHED', 'PROJECT_MEMBERS_ASSIGNED',
+  'PROJECT_MILESTONE_CREATED', 'PROJECT_MILESTONE_UPDATED', 'PROJECT_MILESTONE_STATUS_UPDATED',
+  'PROJECT_DEADLINE_RECONCILED',
+] as const
+
 export function parseProjectDate(value: string, fieldName: string) {
   const sanitized = sanitizeSingleLineText(value, {
     fieldName,
@@ -20,6 +27,14 @@ export function parseProjectDate(value: string, fieldName: string) {
   }
 
   return parsed
+}
+
+export function validatePmacProjectMilestoneTitle(title: string) {
+  if (/^https?:\/\/\S+$/i.test(title.trim())) {
+    throw new Error('Milestone title cannot be a URL. Add the URL under Project Links instead.')
+  }
+
+  return title
 }
 
 export async function getPmacProjectPeopleOptions() {
@@ -164,13 +179,13 @@ export async function reconcilePmacProjectDeadlines(db: Prisma.TransactionClient
   })
 
   for (const project of overdueProjects) {
-    const nextStatus = project.outputSubmittedAt || project.outputSummary ? 'COMPLETED' : 'ON_HOLD'
+    const nextStatus = 'ON_HOLD'
 
     await db.pmacProject.update({
       where: { id: project.id },
       data: {
         status: nextStatus,
-        completedAt: nextStatus === 'COMPLETED' ? new Date() : null,
+        completedAt: null,
       },
     })
 
@@ -182,8 +197,8 @@ export async function reconcilePmacProjectDeadlines(db: Prisma.TransactionClient
       actorName: 'System',
       actorRole: 'CMAC_COORDINATOR',
       action: 'PROJECT_DEADLINE_RECONCILED',
-      summary: nextStatus === 'COMPLETED'
-        ? `Marked project "${project.title}" completed at deadline because output was submitted.`
+      summary: project.outputSubmittedAt || project.outputSummary
+        ? `Placed project "${project.title}" on hold at the deadline; the assigned head must close it.`
         : `Placed project "${project.title}" on hold because no output was submitted by the deadline.`,
       changes: {
         status: { before: project.status, after: nextStatus },
@@ -214,6 +229,9 @@ export async function assertPmacProjectAccess(projectId: string, user: SessionUs
       branch: true,
       title: true,
       headMemberId: true,
+      status: true,
+      outputSummary: true,
+      milestones: { select: { status: true } },
     },
   })
 
@@ -240,10 +258,6 @@ export async function assertPmacProjectAccess(projectId: string, user: SessionUs
 }
 
 export function canClosePmacProject(project: { headMemberId: string | null }, user: SessionUser) {
-  if (user.role === 'CMAC_COORDINATOR') {
-    return true
-  }
-
   return user.role === 'PMAC_EXECUTIVE'
     && !!user.pmacMemberId
     && project.headMemberId === user.pmacMemberId
@@ -262,19 +276,37 @@ export async function hasPmacDirectorClosureCheck(projectId: string) {
       action: 'PROJECT_DIRECTOR_CHECKED',
       actorRole: 'PMAC_DIRECTOR',
     },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: {
       id: true,
+      createdAt: true,
     },
   })
 
-  return !!check
+  if (!check) return false
+
+  const changedAfterCheck = await prisma.pmacActivityLog.findFirst({
+    where: {
+      projectId,
+      action: { in: [...PMAC_PROJECT_CLOSURE_INVALIDATING_ACTIONS] },
+      createdAt: { gt: check.createdAt },
+    },
+    select: { id: true },
+  })
+
+  return !changedAfterCheck
+}
+
+export function getProjectClosureProblem(project: {
+  outputSummary: string | null
+  milestones: Array<{ status: PmacProjectMilestoneStatusValue }>
+}) {
+  if (!project.outputSummary?.trim()) return 'Submit a project output summary before closing the project.'
+  if (project.milestones.some(milestone => milestone.status !== 'DONE')) return 'Complete every project milestone before closing the project.'
+  return null
 }
 
 export function assertPmacProjectCloseAccess(project: { headMemberId: string | null }, user: SessionUser, directorChecked: boolean) {
-  if (user.role === 'CMAC_COORDINATOR') {
-    return
-  }
-
   if (isAssignedPmacProjectHead(project, user) && directorChecked) {
     return
   }
@@ -284,6 +316,6 @@ export function assertPmacProjectCloseAccess(project: { headMemberId: string | n
   }
 
   if (!canClosePmacProject(project, user)) {
-    throw new Error('Only the assigned executive head can close this project. CMAC coordinator may bypass when needed.')
+    throw new Error('Only the assigned executive head can close this project.')
   }
 }

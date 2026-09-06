@@ -7,6 +7,21 @@ export function getPmacAttendanceRecordKey(record: AttendanceScopeRecord) {
   return `${record.eventId}:${record.memberId}`
 }
 
+export function validatePmacAttendanceEvent(
+  event: { status: string; startDateTime: Date },
+  now = new Date(),
+) {
+  if (event.status !== 'APPROVED' && event.status !== 'COMPLETED') {
+    return 'Attendance can only be recorded for approved or completed PMAC events.'
+  }
+
+  if (event.startDateTime.getTime() > now.getTime()) {
+    return 'Attendance can only be recorded after the event begins.'
+  }
+
+  return null
+}
+
 export function validatePmacAttendanceSubmission(
   records: AttendanceScopeRecord[],
   assignedMemberKeys?: ReadonlySet<string>,
@@ -25,7 +40,7 @@ export function validatePmacAttendanceSubmission(
   }
 
   if (assignedMemberKeys && recordKeys.some(key => !assignedMemberKeys.has(key))) {
-    return 'Attendance can only be recorded for members assigned to the selected event.'
+    return 'Attendance can only be recorded for members who confirmed their event assignment.'
   }
 
   return null

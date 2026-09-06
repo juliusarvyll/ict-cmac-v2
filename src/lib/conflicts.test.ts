@@ -9,7 +9,10 @@ describe('CMAC conflict checks', () => {
       serviceRequest: {
         findMany: vi.fn().mockRejectedValue(new Error('database unavailable')),
       },
-    } as unknown as Pick<Prisma.TransactionClient, 'serviceRequest'>
+      pmacEvent: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    } as unknown as Pick<Prisma.TransactionClient, 'serviceRequest' | 'pmacEvent'>
 
     await expect(findRequestConflicts({
       startDate: '2026-07-20',
@@ -32,7 +35,10 @@ describe('CMAC conflict checks', () => {
           eventVenue: 'MM Hall',
         }]),
       },
-    } as unknown as Pick<Prisma.TransactionClient, 'serviceRequest'>
+      pmacEvent: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    } as unknown as Pick<Prisma.TransactionClient, 'serviceRequest' | 'pmacEvent'>
 
     const result = await findRequestConflicts({
       startDate: '2026-07-20',
@@ -43,5 +49,30 @@ describe('CMAC conflict checks', () => {
 
     expect(result.hasConflict).toBe(true)
     expect(result.conflicts[0]?.title).toBe('Existing Event')
+  })
+
+  it('detects a conflicting manually-created PMAC event', async () => {
+    const database = {
+      serviceRequest: { findMany: vi.fn().mockResolvedValue([]) },
+      pmacEvent: {
+        findMany: vi.fn().mockResolvedValue([{
+          title: 'PMAC Workshop',
+          startDateTime: new Date('2026-07-20T09:00:00'),
+          endDateTime: new Date('2026-07-20T11:00:00'),
+          status: 'APPROVED',
+          venue: 'MM Hall',
+        }]),
+      },
+    } as unknown as Pick<Prisma.TransactionClient, 'serviceRequest' | 'pmacEvent'>
+
+    const result = await findRequestConflicts({
+      startDate: '2026-07-20',
+      startTime: '10:00',
+      endTime: '12:00',
+      eventVenue: 'mm hall',
+    }, database)
+
+    expect(result.hasConflict).toBe(true)
+    expect(result.conflicts[0]?.title).toBe('PMAC Workshop')
   })
 })

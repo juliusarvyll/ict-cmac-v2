@@ -56,7 +56,7 @@ export default function Sidebar() {
           { href: '/new-request', label: 'New Request', icon: FilePlus2 },
           { href: '/calendar', label: 'Calendar', icon: CalendarDays },
           { href: '/analytics', label: 'Analytics', icon: BarChart3 },
-          { href: '/logs', label: 'System Logs', icon: History },
+          { href: '/logs', label: 'CMAC Request Audit', icon: History },
           { href: '/admin', label: 'Admin', icon: Settings },
         ]),
     ...(role === 'CMAC_COORDINATOR'
@@ -66,7 +66,7 @@ export default function Sidebar() {
           { href: '/coordinator/pmac/events', label: 'PMAC Events', icon: ClipboardList },
           { href: '/pmac/projects', label: 'Branch Projects', icon: FolderKanban },
           { href: '/coordinator/pmac/polls', label: 'PMAC Polls', icon: Vote },
-          { href: '/coordinator/pmac/activity', label: 'PMAC Activity', icon: History },
+          { href: '/coordinator/pmac/activity', label: 'PMAC Operations Audit', icon: History },
           { href: '/coordinator/pmac/reports', label: 'PMAC Reports', icon: BarChart3 },
         ]
       : []),

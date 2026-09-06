@@ -1,10 +1,10 @@
 'use server'
 
+import { getAuthenticatedSession } from '@/lib/security'
+
 import { Prisma, type ServiceType } from "@prisma/client"
 import { unstable_noStore as noStore } from "next/cache"
-import { getServerSession } from "next-auth"
 
-import { authOptions } from "@/lib/auth"
 import { findRequestConflicts } from "@/lib/conflicts"
 import { revalidatePmacViews } from "@/lib/pmacRevalidation"
 import { syncPmacEventFromServiceRequest } from "@/lib/pmacRequestSync"
@@ -360,6 +360,7 @@ export async function updateServiceRequest(id: string, formData: RequestInput) {
           ? `/api/request-letters/${normalized.letterAttachmentId}`
           : normalized.letterUrl,
         letterContent: normalized.letterContent,
+        eventDetails: normalized.eventDetails,
         needsSameDayEdit: normalized.needsSameDayEdit,
         needsSameDayPhoto: normalized.needsSameDayPhoto,
       },
@@ -392,7 +393,7 @@ export async function getRequests() {
   noStore()
 
   try {
-    const session = await getServerSession(authOptions)
+    const session = await getAuthenticatedSession()
     if (!session || !session.user) {
       return []
     }
@@ -412,6 +413,13 @@ export async function getRequests() {
         secretary: { select: { name: true } },
         coordinator: { select: { name: true } },
         director: { select: { name: true } },
+        pmacEvent: {
+          select: {
+            id: true,
+            status: true,
+            handoffAcknowledgedAt: true,
+          },
+        },
         logs: {
           orderBy: {
             createdAt: 'desc',
@@ -436,7 +444,7 @@ export async function getRequests() {
 export async function getCalendarRequests() {
   noStore()
 
-  const session = await getServerSession(authOptions)
+  const session = await getAuthenticatedSession()
   if (!session || !session.user) return []
   if (!isCoreWorkflowRole(session.user.role)) return []
 

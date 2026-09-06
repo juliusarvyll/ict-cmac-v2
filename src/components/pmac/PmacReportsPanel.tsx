@@ -31,7 +31,7 @@ type ReportStats = {
   activity: number
   archivedActivity: number
   attendanceRecords: number
-  attendanceRate: number
+  attendanceRate: number | null
   averageReadinessScore: number
   reliableMembers: number
   incompleteMemberProfiles: number
@@ -215,7 +215,7 @@ export default function PmacReportsPanel({
         </div>
         <div className="card p-5">
           <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Attendance</p>
-          <p className="mt-3 text-3xl font-bold text-slate-800">{stats.attendanceRate}%</p>
+          <p className="mt-3 text-3xl font-bold text-slate-800">{stats.attendanceRate === null ? 'No data' : `${stats.attendanceRate}%`}</p>
           <p className="mt-1 text-xs text-slate-500">{stats.attendanceRecords} records · {stats.attendanceGaps} recent event gaps</p>
         </div>
         <div className="card p-5">
@@ -420,7 +420,7 @@ export default function PmacReportsPanel({
                 <tr>
                   <th className="px-5 py-3 font-bold">Event</th>
                   <th className="px-4 py-3 font-bold">Date</th>
-                  <th className="px-4 py-3 text-center font-bold">Assigned</th>
+                  <th className="px-4 py-3 text-center font-bold">Confirmed / Assigned</th>
                   <th className="px-4 py-3 text-center font-bold">Pending</th>
                   <th className="px-5 py-3 text-right font-bold">Coverage</th>
                 </tr>
@@ -430,7 +430,7 @@ export default function PmacReportsPanel({
                   <tr key={event.id}>
                     <td className="max-w-[280px] truncate px-5 py-3 font-semibold text-slate-700">{event.title}</td>
                     <td className="px-4 py-3 text-slate-500">{new Date(event.startsAt).toLocaleDateString('en-PH')}</td>
-                    <td className="px-4 py-3 text-center text-slate-600">{event.assigned}/{event.recommended || event.assigned}</td>
+                    <td className="px-4 py-3 text-center text-slate-600">{event.confirmed}/{event.assigned}</td>
                     <td className="px-4 py-3 text-center text-slate-600">{event.pending}</td>
                     <td className="px-5 py-3 text-right font-bold text-slate-700">{event.percentage}%</td>
                   </tr>
@@ -514,7 +514,7 @@ export default function PmacReportsPanel({
                       <td className="px-5 py-3 font-semibold text-slate-700">{member.name}</td>
                       <td className="px-4 py-3 text-slate-500">{member.department || 'Not set'}</td>
                       <td className="px-4 py-3 text-center text-slate-600">{member.assignments}</td>
-                      <td className="px-4 py-3 text-center font-semibold text-slate-600">{member.attendanceRate}%</td>
+                      <td className="px-4 py-3 text-center font-semibold text-slate-600">{member.attendanceRate === null ? 'No data' : `${member.attendanceRate}%`}</td>
                       <td className="px-5 py-3 text-right font-semibold text-slate-600">{member.absences}</td>
                     </tr>
                   ))}

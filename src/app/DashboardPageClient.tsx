@@ -1,13 +1,13 @@
 'use client'
 
-import { CheckCircle2, ChevronRight, Clock, FileCheck2, Layers, Camera, Video, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Clock, FileCheck2, Layers, ListChecks, Camera, Video, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { ElementType } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import clsx from 'clsx'
 
-import { getStatusColor, getStatusLabel } from '@/lib/data'
 import { announceNotificationsRead, NOTIFICATIONS_READ_EVENT, type NotificationsReadDetail } from '@/lib/notificationEvents'
 import { getRoleLabel } from '@/lib/roles'
 import { getDashboardStats } from './dashboardActions'
@@ -95,6 +95,8 @@ export default function DashboardPageClient() {
   const router = useRouter()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [workflowExpanded, setWorkflowExpanded] = useState(true)
+  const [notificationError, setNotificationError] = useState('')
 
   useEffect(() => {
     getDashboardStats().then((data) => {
@@ -121,26 +123,29 @@ export default function DashboardPageClient() {
   }, [])
 
   const handleNotifClick = async (notification: AppNotification) => {
-    setStats((previous) => previous ? ({
-      ...previous,
-      notifications: previous.notifications.map((item) => (
-        item.id === notification.id ? { ...item, isRead: true } : item
-      )),
-    }) : previous)
-    announceNotificationsRead([notification.id])
-    await markNotificationAsRead(notification.id, notification.module)
-    router.push(notification.href)
+    try {
+      const result = await markNotificationAsRead(notification.id, notification.module)
+      if (!result.success) throw new Error(result.error)
+      announceNotificationsRead([notification.id])
+      router.push(notification.href)
+    } catch {
+      setNotificationError('Could not save notification read state. Please try again.')
+    }
   }
 
   if (loading || !stats) {
     return <div className="p-10 text-center text-slate-400">Loading dashboard...</div>
   }
 
-  const { total, pending, approved, rejected, coordApproved, recent } = stats
+  const { total, pending, approved, rejected, coordApproved } = stats
   const unreadNotifications = stats.notifications.filter((notification) => !notification.isRead)
+  const workflowNeedsAttention = stats.workflowTimeline.filter((item) => (
+    item.attentionStatusLabel.includes('Needs') || item.attentionStatusLabel.includes('Upcoming')
+  )).length
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 animate-fade-in">
+      {notificationError ? <p role="alert" className="text-sm text-red-600">{notificationError}</p> : null}
       <div
         className="relative rounded-2xl overflow-hidden shadow-xl"
         style={{ background: 'var(--hero-gradient)' }}
@@ -197,12 +202,14 @@ export default function DashboardPageClient() {
                   return
                 }
 
-                setStats((previous) => previous ? ({
-                  ...previous,
-                  notifications: previous.notifications.map((notification) => ({ ...notification, isRead: true })),
-                }) : previous)
-                announceNotificationsRead(unread.map((notification) => notification.id))
-                await markAllNotificationsAsRead(unread)
+                try {
+                  const result = await markAllNotificationsAsRead()
+                  if (!result.success) throw new Error(result.error)
+                  announceNotificationsRead(unread.map(notification => notification.id))
+                  setNotificationError('')
+                } catch {
+                  setNotificationError('Could not mark notifications read. Please try again.')
+                }
               }}
               className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-emerald-600 transition-colors"
             >
@@ -258,37 +265,77 @@ export default function DashboardPageClient() {
 
       {stats.workflowTimeline.length > 0 && (
         <div className="card overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800">Workflow Timeline</h3>
-            <a href="/requests" className="text-sm text-blue-600 hover:underline font-medium">Open queue</a>
+          <div className="flex items-center gap-3 px-5 py-4">
+            <button
+              type="button"
+              aria-expanded={workflowExpanded}
+              aria-controls="dashboard-workflow-timeline"
+              onClick={() => setWorkflowExpanded((expanded) => !expanded)}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                <ListChecks size={18} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold text-slate-800">Workflow Timeline</span>
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  {stats.workflowTimeline.length} recent request{stats.workflowTimeline.length === 1 ? '' : 's'}
+                  {workflowNeedsAttention ? ` · ${workflowNeedsAttention} need attention` : ' · All on track'}
+                </span>
+              </span>
+              <ChevronDown
+                size={18}
+                className={clsx('shrink-0 text-slate-400 transition-transform duration-200', workflowExpanded && 'rotate-180')}
+              />
+            </button>
+            <Link
+              href="/requests"
+              className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+            >
+              Open queue
+            </Link>
           </div>
-          <div className="divide-y divide-slate-50">
-            {stats.workflowTimeline.map((item) => (
-              <a key={item.id} href={item.href} className="block px-6 py-4 hover:bg-slate-50/60 transition-colors">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium text-slate-800 text-sm">{item.title}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {item.school} | {new Date(item.eventDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs font-black uppercase tracking-widest text-slate-500">{item.stageLabel}</p>
-                    <p className={clsx(
-                      'mt-1 text-[11px] font-bold',
-                      item.slaLabel.includes('Needs') || item.slaLabel.includes('Upcoming')
-                        ? 'text-amber-600'
-                        : item.slaLabel === 'Closed'
-                          ? 'text-red-500'
-                          : 'text-emerald-600'
-                    )}>
-                      {item.slaLabel}
-                    </p>
-                  </div>
-                </div>
-              </a>
-            ))}
-          </div>
+          {workflowExpanded ? (
+            <div id="dashboard-workflow-timeline" className="border-t border-slate-100 bg-slate-50/30 px-5 py-2">
+              {stats.workflowTimeline.map((item, index) => {
+                const needsAttention = item.attentionStatusLabel.includes('Needs') || item.attentionStatusLabel.includes('Upcoming')
+                const isClosed = item.attentionStatusLabel === 'Closed'
+
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href}
+                    className="group grid grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 rounded-xl px-2 py-3 transition-colors hover:bg-white hover:shadow-sm"
+                  >
+                    <span className="relative flex justify-center pt-1">
+                      {index < stats.workflowTimeline.length - 1 ? (
+                        <span className="absolute left-1/2 top-4 h-[calc(100%+0.5rem)] w-px -translate-x-1/2 bg-slate-200" />
+                      ) : null}
+                      <span className={clsx(
+                        'relative z-10 h-2.5 w-2.5 rounded-full ring-4 ring-white',
+                        needsAttention ? 'bg-amber-500' : isClosed ? 'bg-red-400' : 'bg-emerald-500'
+                      )} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-slate-800 group-hover:text-emerald-800">{item.title}</span>
+                      <span className="mt-1 block text-xs text-slate-400">
+                        {item.school} · {new Date(item.eventDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    </span>
+                    <span className="text-right">
+                      <span className="block text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{item.stageLabel}</span>
+                      <span className={clsx(
+                        'mt-1 block text-[11px] font-bold',
+                        needsAttention ? 'text-amber-600' : isClosed ? 'text-red-500' : 'text-emerald-600'
+                      )}>
+                        {item.attentionStatusLabel}
+                      </span>
+                    </span>
+                  </Link>
+                )
+              })}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -341,27 +388,6 @@ export default function DashboardPageClient() {
         ))}
       </div>
 
-      <div className="card overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-800">Recent Requests</h3>
-          <a href="/requests" className="text-sm text-blue-600 hover:underline font-medium">View all</a>
-        </div>
-        <div className="divide-y divide-slate-50">
-          {recent.map((request) => (
-            <div key={request.id} className="px-6 py-4 flex items-center justify-between hover:bg-slate-50/60 transition-colors">
-              <div>
-                <p className="font-medium text-slate-800 text-sm">{request.eventTitle}</p>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {request.school} | {request.serviceType || 'Unassigned'} | {request.secretary?.name || 'Unknown requester'} | {new Date(request.eventDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </p>
-              </div>
-              <span className={`status-badge ${getStatusColor(request.status)}`}>
-                {getStatusLabel(request.status)}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }

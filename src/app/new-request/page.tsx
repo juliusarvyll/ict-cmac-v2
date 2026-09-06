@@ -70,6 +70,7 @@ type RequestForm = {
   endTime: string
   eventVenue: string
   letterContent: string
+  eventDetails: string
   serviceType: ServiceType | null
   documentationType: DocumentationType | ''
   letterFile: File | null
@@ -102,6 +103,7 @@ export default function NewRequestPage() {
     endTime: '17:00',
     eventVenue: '',
     letterContent: '',
+    eventDetails: '',
     serviceType: null as ServiceType | null,
     documentationType: '' as DocumentationType | '',
     letterFile: null as File | null,
@@ -176,6 +178,7 @@ export default function NewRequestPage() {
         endTime: request.endTime || '',
         eventVenue: request.eventVenue,
         letterContent: request.letterContent || '',
+        eventDetails: request.eventDetails || '',
         serviceType: request.serviceType,
         documentationType: request.documentationType,
         needsSameDayEdit: request.needsSameDayEdit,
@@ -350,6 +353,7 @@ ${isDirector ? 'Director' : 'Secretary'}, ${form.school || '[School/Department]'
           endTime: form.endTime,
           eventVenue: form.eventVenue,
           letterContent: submissionMethod === 'generate' ? form.letterContent : null,
+          eventDetails: form.eventDetails,
           school: form.school,
           serviceType: form.serviceType,
           documentationType: form.documentationType,
@@ -767,6 +771,21 @@ ${isDirector ? 'Director' : 'Secretary'}, ${form.school || '[School/Department]'
                   ))}
 
                 </div>
+              </div>
+
+              <div className="pt-2">
+                <label className="mb-2 ml-1 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                  Coverage Instructions
+                </label>
+                <textarea
+                  value={form.eventDetails}
+                  onChange={(event) => set('eventDetails', event.target.value)}
+                  rows={4}
+                  maxLength={4000}
+                  placeholder="Describe key moments, expected outputs, contact person, access instructions, and delivery deadline."
+                  className="w-full resize-y rounded-2xl border-2 border-slate-100 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-colors focus:border-emerald-400"
+                />
+                <p className="mt-2 text-xs text-slate-400">PMAC receives these instructions when the request is approved and routed for coverage.</p>
               </div>
             </div>
           </div>

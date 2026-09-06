@@ -40,6 +40,8 @@ services:
       - .env
     ports:
       - "3000:3000"
+    volumes:
+      - ict-cmac-pmac-uploads:/app/private/uploads/pmac
     environment:
       DATABASE_URL: mysql://root:root@db:3306/ict_cmac
       CLAMAV_HOST: clamav
@@ -52,3 +54,4 @@ services:
 volumes:
   ict-cmac-mysql-data:
   ict-cmac-clamav-data:
+  ict-cmac-pmac-uploads:

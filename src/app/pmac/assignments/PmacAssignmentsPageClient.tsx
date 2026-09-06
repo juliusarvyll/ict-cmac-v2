@@ -169,7 +169,7 @@ export default function PmacAssignmentsPageClient({ role }: { role: string }) {
                           {assignment.memberInsights.workloadTier} load
                         </span>
                         <span className="status-badge border-emerald-200 bg-emerald-50 text-emerald-700">
-                          {assignment.memberInsights.attendanceRate}% attendance
+                          {assignment.memberInsights.attendanceRate === null ? 'No attendance data' : `${assignment.memberInsights.attendanceRate}% attendance`}
                         </span>
                       </div>
                     </div>
@@ -194,7 +194,7 @@ export default function PmacAssignmentsPageClient({ role }: { role: string }) {
                       )}
                     </div>
 
-                    {canRespond ? (
+                    {canRespond && assignment.event.status === 'APPROVED' && assignment.availabilityResponse === 'PENDING' ? (
                       <div className="flex gap-2 lg:justify-end">
                         <button
                           type="button"
@@ -213,6 +213,8 @@ export default function PmacAssignmentsPageClient({ role }: { role: string }) {
                           No
                         </button>
                       </div>
+                    ) : canRespond ? (
+                      <p className="text-xs font-semibold text-slate-500 lg:text-right">Response locked</p>
                     ) : null}
                   </div>
                 ))}

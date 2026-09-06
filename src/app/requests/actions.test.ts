@@ -28,7 +28,7 @@ vi.mock('@/lib/requestWorkflow', () => ({
   getRequestListWhere: vi.fn(),
   revalidateRequestViews: mocks.revalidateRequestViews,
 }))
-vi.mock('@/lib/security', () => ({ assertActionAccess: mocks.assertActionAccess }))
+vi.mock('@/lib/security', () => ({ assertActionAccess: mocks.assertActionAccess, getAuthenticatedSession: mocks.getServerSession }))
 vi.mock('@/lib/roles', () => ({ isCoreWorkflowRole: vi.fn(() => true) }))
 vi.mock('@/lib/zeroTrust', () => ({ isPrivilegedRole: vi.fn(() => false) }))
 

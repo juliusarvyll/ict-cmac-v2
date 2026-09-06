@@ -99,7 +99,7 @@ async function resolveCurrentSession(session: Session | null): Promise<AuthSessi
       })
     : null
 
-  if (!freshUser && session.user.email) {
+  if (!session.user.id && !freshUser && session.user.email) {
     freshUser = await prisma.user.findUnique({
       where: { email: session.user.email },
       select: userSelect,
@@ -122,8 +122,13 @@ async function resolveCurrentSession(session: Session | null): Promise<AuthSessi
   return session
 }
 
+// JWTs establish identity, not continuing account/role authorization.
+export async function getAuthenticatedSession(): Promise<AuthSession | null> {
+  return resolveCurrentSession(await getServerSession(authOptions))
+}
+
 export async function requireAuthenticatedSession(): Promise<AuthSession> {
-  const session = await resolveCurrentSession(await getServerSession(authOptions))
+  const session = await getAuthenticatedSession()
 
   if (!session?.user) {
     redirect('/auth/signin')

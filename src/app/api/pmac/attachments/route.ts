@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { PMAC_UPLOAD_ROOT, resolvePmacAttachmentPath } from '@/lib/pmacAttachmentStorage'
 import { mkdir, unlink, writeFile } from 'fs/promises'
 import path from 'path'
 
@@ -10,13 +11,14 @@ import {
   scanUploadedFile,
 } from '@/lib/malwareScan'
 import { recordPmacActivity } from '@/lib/pmacActivity'
+import { PMAC_POLL_MANAGER_ROLES } from '@/lib/pmac'
 import { prisma } from '@/lib/prisma'
 import { assertActionAccess, assertSameOriginMutation } from '@/lib/security'
 import { sanitizeMultilineText, sanitizeSingleLineText } from '@/lib/sanitization'
 
 export const runtime = 'nodejs'
 
-const UPLOAD_ROOT = path.join(process.cwd(), 'public', 'uploads', 'pmac')
+const UPLOAD_ROOT = PMAC_UPLOAD_ROOT
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024
 const ALLOWED_UPLOAD_TYPES = {
   'application/pdf': {
@@ -81,6 +83,7 @@ async function ensureAttachmentAccess(
   targetType: 'event' | 'poll' | 'member',
   targetId: string
 ) {
+  if (!['event', 'poll', 'member'].includes(targetType)) throw new Error('Invalid attachment target type.')
   if (targetType === 'event') {
     const event = await prisma.pmacEvent.findUnique({
       where: { id: targetId },
@@ -108,7 +111,7 @@ async function ensureAttachmentAccess(
       throw new Error('PMAC poll not found.')
     }
 
-    if (!['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR'].includes(role)) {
+    if (!PMAC_POLL_MANAGER_ROLES.includes(role as (typeof PMAC_POLL_MANAGER_ROLES)[number])) {
       throw new Error('Unauthorized')
     }
 
@@ -132,7 +135,7 @@ async function ensureAttachmentAccess(
 }
 
 async function removeStoredFile(filePath: string) {
-  const absolutePath = path.join(process.cwd(), 'public', filePath.replace(/^\/+/, ''))
+  const absolutePath = resolvePmacAttachmentPath(filePath)
 
   try {
     await unlink(absolutePath)
@@ -142,9 +145,10 @@ async function removeStoredFile(filePath: string) {
 }
 
 export async function POST(request: NextRequest) {
+  let pendingFile: string | null = null
   try {
     assertSameOriginMutation(request)
-    const session = await assertActionAccess(['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY'], {
+    const session = await assertActionAccess([...PMAC_POLL_MANAGER_ROLES], {
     })
     const formData = await request.formData()
 
@@ -194,7 +198,7 @@ export async function POST(request: NextRequest) {
     const storedName = `${randomUUID()}${extension}`
     const directory = path.join(UPLOAD_ROOT, monthFolder)
     const absolutePath = path.join(directory, storedName)
-    const filePath = `/uploads/pmac/${monthFolder}/${storedName}`
+    const filePath = `/private/uploads/pmac/${monthFolder}/${storedName}`
     const bytes = Buffer.from(await file.arrayBuffer())
 
     if (!hasAllowedFileSignature(bytes, file.type as AllowedUploadMimeType)) {
@@ -204,6 +208,7 @@ export async function POST(request: NextRequest) {
     await scanUploadedFile(bytes)
     await mkdir(directory, { recursive: true })
     await writeFile(absolutePath, bytes)
+    pendingFile = filePath
 
     const attachment = await prisma.$transaction(async (tx) => {
       const createdAttachment = await tx.pmacAttachment.create({
@@ -245,8 +250,10 @@ export async function POST(request: NextRequest) {
       return createdAttachment
     })
 
+    pendingFile = null
     return NextResponse.json({ attachment })
   } catch (error) {
+    if (pendingFile) await removeStoredFile(pendingFile)
     const message = error instanceof Error ? error.message : 'Unable to upload PMAC attachment.'
     const status =
       error instanceof MalwareDetectedError
@@ -270,7 +277,7 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     assertSameOriginMutation(request)
-    const session = await assertActionAccess(['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY'], {
+    const session = await assertActionAccess([...PMAC_POLL_MANAGER_ROLES], {
       zeroTrust: true,
     })
     const body = await request.json()
@@ -300,7 +307,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
-    if (attachment.pollId && !['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR'].includes(session.user.role)) {
+    if (attachment.pollId && !PMAC_POLL_MANAGER_ROLES.includes(session.user.role as (typeof PMAC_POLL_MANAGER_ROLES)[number])) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 

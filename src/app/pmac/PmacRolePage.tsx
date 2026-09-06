@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { isPmacAssignmentResponderRole, isPmacEventManagerRole, PMAC_EXECUTIVE_TITLE_LABELS, PMAC_PROJECT_STATUS_LABELS } from '@/lib/pmac'
+import { isPmacAssignmentResponderRole, isPmacEventManagerRole, isPmacPollManagerRole, PMAC_EXECUTIVE_TITLE_LABELS, PMAC_PROJECT_STATUS_LABELS } from '@/lib/pmac'
 import { getPmacProjectWhere } from '@/lib/pmacProjects'
 import { getRoleLabel } from '@/lib/roles'
 import type { Role } from '@/types'
@@ -24,11 +24,7 @@ function getPmacRoleLinks(role: Role) {
     links.unshift({ href: '/pmac/events/new', label: 'Create Event' })
   }
 
-  if (role === 'PMAC_DIRECTOR') {
-    links.unshift({ href: '/pmac/polls/new', label: 'Create Poll' })
-  }
-
-  if (role === 'PMAC_ASSISTANT_DIRECTOR') {
+  if (isPmacPollManagerRole(role)) {
     links.unshift({ href: '/pmac/polls/new', label: 'Create Poll' })
   }
 

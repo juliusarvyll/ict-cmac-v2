@@ -16,7 +16,8 @@ import { useEffect } from 'react'
 import {
   getRequesterName,
   getSecretaryTitle,
-  getSlaLabel,
+  getAttentionStatusLabel,
+  PMAC_FULFILLMENT_LABELS,
   type ConflictItem,
   type RequestItem,
   type SameDayEventItem,
@@ -41,7 +42,7 @@ export default function RequestsPage() {
   const [printMode, setPrintMode] = useState<'LETTER' | 'RECEIPT'>('LETTER')
   const [selectedServiceType, setSelectedServiceType] = useState<ServiceType | null>(null)
   const [isDownloadingPastEvents, setIsDownloadingPastEvents] = useState(false)
-  const [slaReferenceTime] = useState(() => Date.now())
+  const [attentionReferenceTime] = useState(() => Date.now())
   const showLegacyLetter = false
   const selectedServiceLabel = selected?.serviceType || 'Unassigned'
   const receiptLetterSource =
@@ -347,7 +348,7 @@ export default function RequestsPage() {
                   { label: 'Service Type', width: 'w-[17%]' },
                   { label: 'Submitted', width: isCoordinator ? 'w-[18%]' : 'w-[16%]' },
                   { label: 'Status', width: isCoordinator ? 'w-[24%]' : 'w-[19%]' },
-                  ...(!isCoordinator ? [{ label: 'SLA', width: 'w-[13%]' }] : []),
+                  ...(!isCoordinator ? [{ label: 'Attention Status', width: 'w-[13%]' }] : []),
                   { label: 'Actions', width: 'w-[9%]' },
                 ].map((header) => (
                   <th
@@ -383,14 +384,19 @@ export default function RequestsPage() {
                     <span className={`status-badge font-bold ${getStatusColor(req.status)}`}>
                       {getStatusLabel(req.status)}
                     </span>
+                    {req.serviceType === 'PMAC' && req.status === 'DIRECTOR_APPROVED' ? (
+                      <p className="mt-2 text-[10px] font-black uppercase tracking-wide text-sky-700">
+                        {PMAC_FULFILLMENT_LABELS[req.pmacFulfillmentStatus]}
+                      </p>
+                    ) : null}
                   </td>
                   {!isCoordinator && (
                     <td className="px-4 py-5 xl:px-6">
                       <span className={clsx(
                         'text-[10px] font-black uppercase tracking-widest',
-                        getSlaLabel(req, slaReferenceTime).includes('Needs') || getSlaLabel(req, slaReferenceTime).includes('Upcoming') ? 'text-amber-600' : getSlaLabel(req, slaReferenceTime) === 'Closed' ? 'text-red-500' : 'text-emerald-600'
+                        getAttentionStatusLabel(req, attentionReferenceTime).includes('Needs') || getAttentionStatusLabel(req, attentionReferenceTime).includes('Upcoming') ? 'text-amber-600' : getAttentionStatusLabel(req, attentionReferenceTime) === 'Closed' ? 'text-red-500' : 'text-emerald-600'
                       )}>
-                        {getSlaLabel(req, slaReferenceTime)}
+                        {getAttentionStatusLabel(req, attentionReferenceTime)}
                       </span>
                     </td>
                   )}
@@ -481,6 +487,9 @@ export default function RequestsPage() {
                       ['Doc Type', selected.documentationType === 'BOTH' ? 'Photo + Video' : selected.documentationType],
                       ['Location', selected.campusType === 'IN_CAMPUS' ? 'In-Campus' : 'Off-Campus'],
                       ['Status', getStatusLabel(selected.status)],
+                      ...(selected.serviceType === 'PMAC'
+                        ? [['PMAC Fulfillment', PMAC_FULFILLMENT_LABELS[selected.pmacFulfillmentStatus]]]
+                        : []),
                     ].map(([k, v]) => (
                       <div key={k}>
                         <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">{k}</p>

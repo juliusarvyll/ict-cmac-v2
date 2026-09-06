@@ -7,7 +7,7 @@ import { Plus, Search, Vote } from 'lucide-react'
 import { getPmacPolls } from '@/app/pmac/actions'
 import { PmacPollStatusBadge, PmacPollTypeBadge, PmacVoteChoiceBadge } from '@/components/pmac/PmacBadges'
 import { filterPmacPolls } from '@/lib/pmacFilters'
-import { PMAC_POLL_RESULTS_VISIBILITY_LABELS, PMAC_POLL_STATUSES, PMAC_POLL_STATUS_LABELS, PMAC_POLL_TYPES, PMAC_POLL_TYPE_LABELS } from '@/lib/pmac'
+import { isPmacPollManagerRole, PMAC_POLL_RESULTS_VISIBILITY_LABELS, PMAC_POLL_STATUSES, PMAC_POLL_STATUS_LABELS, PMAC_POLL_TYPES, PMAC_POLL_TYPE_LABELS } from '@/lib/pmac'
 
 type PollListItem = Awaited<ReturnType<typeof getPmacPolls>>[number]
 
@@ -68,7 +68,7 @@ export default function PmacPollsPageClient({ role }: { role: string }) {
           <p className="mt-2 text-sm text-slate-500">Track internal PMAC decisions, member participation, and event-related consultations in one place.</p>
         </div>
 
-        {(role === 'PMAC_DIRECTOR' || role === 'PMAC_ASSISTANT_DIRECTOR') ? (
+        {isPmacPollManagerRole(role) ? (
           <Link
             href="/pmac/polls/new"
             className="inline-flex items-center gap-2 rounded-xl bg-[#064e3b] px-4 py-2 text-sm font-semibold text-white hover:bg-[#065f46]"
@@ -166,7 +166,7 @@ export default function PmacPollsPageClient({ role }: { role: string }) {
         <div className="card p-10 text-center space-y-3">
           <h3 className="font-display text-2xl font-bold text-slate-800">No PMAC polls yet</h3>
           <p className="text-sm text-slate-500">
-            {(role === 'PMAC_DIRECTOR' || role === 'PMAC_ASSISTANT_DIRECTOR')
+            {isPmacPollManagerRole(role)
               ? 'Start by creating a draft poll, then open it when the club is ready to vote.'
               : 'Once PMAC officers publish polls, they will appear here for participation.'}
           </p>

@@ -24,6 +24,9 @@ type RequestMirrorInput = {
   campusType: CampusType
   letterContent: string | null
   eventDetails: string | null
+  needsSameDayEdit: boolean
+  needsSameDayPhoto: boolean
+  pmacFulfillmentStatus: 'NOT_APPLICABLE' | 'RELEASED' | 'ACKNOWLEDGED' | 'STAFFING' | 'READY' | 'EVENT_COMPLETED' | 'DELIVERED' | 'CANCELLED'
   status: 'PENDING' | 'COORDINATOR_APPROVED' | 'DIRECTOR_APPROVED' | 'REVISION_REQUESTED' | 'WITHDRAWN' | 'CANCELLED' | 'REJECTED' | 'ARCHIVED'
   deletedAt: Date | null
   secretaryId: string
@@ -54,12 +57,16 @@ export function shouldMirrorRequestToPmacEvent(request: Pick<RequestMirrorInput,
 }
 
 export function buildPmacEventScheduleFromRequest(request: Pick<RequestMirrorInput, 'eventDate' | 'endDate' | 'startTime' | 'endTime'>) {
+  if (!request.startTime || !request.endTime) {
+    throw new Error('PMAC-routed requests require confirmed start and end times before approval.')
+  }
+
   const startDateTime = applyTime(request.eventDate, request.startTime, 8, 0)
   const endDateBase = request.endDate ?? request.eventDate
-  let endDateTime = applyTime(endDateBase, request.endTime, 17, 0)
+  const endDateTime = applyTime(endDateBase, request.endTime, 17, 0)
 
   if (endDateTime <= startDateTime) {
-    endDateTime = new Date(startDateTime.getTime() + (60 * 60 * 1000))
+    throw new Error('The PMAC event end time must be after its start time.')
   }
 
   return {
@@ -79,7 +86,7 @@ function formatDocumentationType(value: DocumentationType) {
   }
 }
 
-function buildImportedEventDescription(request: Pick<RequestMirrorInput, 'school' | 'documentationType' | 'campusType' | 'eventDetails'>) {
+function buildImportedEventDescription(request: Pick<RequestMirrorInput, 'school' | 'documentationType' | 'campusType' | 'eventDetails' | 'needsSameDayEdit' | 'needsSameDayPhoto'>) {
   const details = request.eventDetails?.trim()
 
   return [
@@ -87,6 +94,8 @@ function buildImportedEventDescription(request: Pick<RequestMirrorInput, 'school
     `School/Department: ${request.school}`,
     `Documentation: ${formatDocumentationType(request.documentationType)}`,
     `Campus Type: ${request.campusType === 'OFF_CAMPUS' ? 'Off-Campus' : 'In-Campus'}`,
+    request.needsSameDayEdit ? 'Priority Requirement: Same-day video edit.' : null,
+    request.needsSameDayPhoto ? 'Priority Requirement: Same-day photo delivery.' : null,
     details ? `Request Notes: ${details}` : null,
   ].filter(Boolean).join('\n\n')
 }
@@ -119,10 +128,18 @@ export async function syncPmacEventFromServiceRequest(
       await tx.pmacEvent.update({
         where: { id: retained.id },
         data: {
-          status: retained.status === 'COMPLETED' ? 'COMPLETED' : 'REJECTED',
+          status: retained.status === 'COMPLETED' ? 'COMPLETED' : 'CANCELLED',
           rejectedAt: retained.status === 'COMPLETED' ? undefined : new Date(),
           sourceLabel: 'Retained from a closed CMAC request',
           approvalRemarks: `CMAC request is now ${request.status.toLowerCase().replaceAll('_', ' ')}.`,
+        },
+      })
+
+      await tx.serviceRequest.update({
+        where: { id: request.id },
+        data: {
+          pmacFulfillmentStatus: retained.status === 'COMPLETED' ? request.pmacFulfillmentStatus : 'CANCELLED',
+          pmacFulfillmentUpdatedAt: new Date(),
         },
       })
 
@@ -157,6 +174,12 @@ export async function syncPmacEventFromServiceRequest(
       startDateTime: true,
       endDateTime: true,
       venue: true,
+      description: true,
+      sourceSchool: true,
+      sourceDocumentationType: true,
+      sourceCampusType: true,
+      sourceNeedsSameDayEdit: true,
+      sourceNeedsSameDayPhoto: true,
     },
   })
 
@@ -181,6 +204,8 @@ export async function syncPmacEventFromServiceRequest(
         sourceSchool: request.school,
         sourceDocumentationType: request.documentationType,
         sourceCampusType: request.campusType,
+        sourceNeedsSameDayEdit: request.needsSameDayEdit,
+        sourceNeedsSameDayPhoto: request.needsSameDayPhoto,
         createdById,
         approvedById,
         approvalRemarks,
@@ -194,8 +219,24 @@ export async function syncPmacEventFromServiceRequest(
       || existingEvent.endDateTime.getTime() !== endDateTime.getTime()
     const titleChanged = existingEvent.title !== request.eventTitle
     const venueChanged = existingEvent.venue !== request.eventVenue
+    const briefChanged = existingEvent.description !== buildImportedEventDescription(request)
+      || existingEvent.sourceSchool !== request.school
+      || existingEvent.sourceDocumentationType !== request.documentationType
+      || existingEvent.sourceCampusType !== request.campusType
+      || existingEvent.sourceNeedsSameDayEdit !== request.needsSameDayEdit
+      || existingEvent.sourceNeedsSameDayPhoto !== request.needsSameDayPhoto
 
-    if (scheduleChanged || titleChanged || venueChanged) {
+    await tx.serviceRequest.update({
+      where: { id: request.id },
+      data: {
+        pmacFulfillmentStatus: request.pmacFulfillmentStatus === 'NOT_APPLICABLE' || request.pmacFulfillmentStatus === 'CANCELLED'
+          ? 'RELEASED'
+          : request.pmacFulfillmentStatus,
+        pmacFulfillmentUpdatedAt: new Date(),
+      },
+    })
+
+    if (scheduleChanged || titleChanged || venueChanged || briefChanged) {
       await recordPmacActivity(tx, {
         entityType: 'EVENT',
         entityId: existingEvent.id,
@@ -209,6 +250,7 @@ export async function syncPmacEventFromServiceRequest(
           titleChanged ? 'Title changed.' : null,
           scheduleChanged ? 'Schedule changed.' : null,
           venueChanged ? 'Venue changed.' : null,
+          briefChanged ? 'Coverage requirements changed.' : null,
         ].filter(Boolean).join(' '),
       })
     }
@@ -231,11 +273,22 @@ export async function syncPmacEventFromServiceRequest(
       sourceSchool: request.school,
       sourceDocumentationType: request.documentationType,
       sourceCampusType: request.campusType,
+      sourceNeedsSameDayEdit: request.needsSameDayEdit,
+      sourceNeedsSameDayPhoto: request.needsSameDayPhoto,
       createdById,
       approvedById,
       approvalRemarks,
       submittedAt: request.coordinatorApprovedAt ?? request.createdAt,
       approvedAt: request.directorApprovedAt ?? request.createdAt,
+    },
+  })
+
+  await tx.serviceRequest.update({
+    where: { id: request.id },
+    data: {
+      pmacFulfillmentStatus: 'RELEASED',
+      pmacFulfillmentUpdatedAt: new Date(),
+      pmacFulfilledAt: null,
     },
   })
 

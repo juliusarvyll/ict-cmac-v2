@@ -15,11 +15,13 @@ import {
   assertPmacProjectAccess,
   assertPmacProjectCloseAccess,
   buildProjectHealth,
+  getProjectClosureProblem,
   getPmacProjectPeopleOptions,
   hasPmacDirectorClosureCheck,
   mapProjectForClient,
   parseProjectDate,
   reconcilePmacProjectDeadlines,
+  validatePmacProjectMilestoneTitle,
 } from './projectActionSupport'
 
 export async function getPmacProjects() {
@@ -113,17 +115,19 @@ export async function getPmacProjects() {
       },
       activityLogs: {
         where: {
-          action: 'PROJECT_DIRECTOR_CHECKED',
-          actorRole: 'PMAC_DIRECTOR',
+          action: {
+            in: ['PROJECT_DIRECTOR_CHECKED', 'PROJECT_STATUS_UPDATED', 'PROJECT_HEAD_ASSIGNED', 'PROJECT_UPDATED', 'PROJECT_OUTPUT_SUBMITTED', 'PROJECT_LINK_ATTACHED', 'PROJECT_MEMBERS_ASSIGNED', 'PROJECT_MILESTONE_CREATED', 'PROJECT_MILESTONE_UPDATED', 'PROJECT_MILESTONE_STATUS_UPDATED', 'PROJECT_DEADLINE_RECONCILED'],
+          },
         },
         select: {
+          action: true,
           actorName: true,
           createdAt: true,
         },
         orderBy: {
           createdAt: 'desc',
         },
-        take: 1,
+        take: 20,
       },
     },
     orderBy: [
@@ -134,24 +138,29 @@ export async function getPmacProjects() {
   })
   const viewerBranch = await getExecutiveBranchForUser(session.user)
   const mappedProjects = projects.map(project => {
-    const directorCheck = project.activityLogs[0] ?? null
-    const hasDirectorCheck = !!directorCheck
+    const directorCheck = project.activityLogs.find(entry => entry.action === 'PROJECT_DIRECTOR_CHECKED') ?? null
+    const latestChange = project.activityLogs.find(entry => entry.action !== 'PROJECT_DIRECTOR_CHECKED') ?? null
+    const validDirectorCheck = directorCheck && (!latestChange || directorCheck.createdAt >= latestChange.createdAt) ? directorCheck : null
+    const hasDirectorCheck = !!validDirectorCheck
     const hasLauncherAccess = isPmacProjectLauncherRole(session.user.role)
     const hasAssignedHeadAccess = session.user.role === 'PMAC_EXECUTIVE' && project.headMemberId === session.user.pmacMemberId
     const hasUnassignedBranchAccess = session.user.role === 'PMAC_EXECUTIVE' && !project.headMemberId && project.branch === viewerBranch
 
     return {
       ...mapProjectForClient(project),
-      directorCheck: directorCheck
+      directorCheck: validDirectorCheck
         ? {
-            checkedBy: directorCheck.actorName,
-            checkedAt: directorCheck.createdAt,
+            checkedBy: validDirectorCheck.actorName,
+            checkedAt: validDirectorCheck.createdAt,
           }
         : null,
       canManageProject: hasLauncherAccess || hasAssignedHeadAccess || hasUnassignedBranchAccess,
       canManageMembers: hasLauncherAccess || hasAssignedHeadAccess || hasUnassignedBranchAccess,
+      isAssignedHead: hasAssignedHeadAccess,
+      allMilestonesComplete: project.milestones.every(milestone => milestone.status === 'DONE'),
+      hasOutput: !!project.outputSummary?.trim(),
       mustSelectProjectMembers: session.user.role === 'PMAC_EXECUTIVE' && (hasAssignedHeadAccess || hasUnassignedBranchAccess),
-      canCloseProject: session.user.role === 'CMAC_COORDINATOR' || (hasAssignedHeadAccess && hasDirectorCheck),
+      canCloseProject: hasAssignedHeadAccess && hasDirectorCheck,
       isWaitingForDirectorCheck: hasAssignedHeadAccess && !hasDirectorCheck && project.status !== 'COMPLETED',
       canDirectorCheckProject: session.user.role === 'PMAC_DIRECTOR' && !hasDirectorCheck && project.status !== 'COMPLETED',
     }
@@ -426,9 +435,14 @@ export async function updatePmacProjectStatus(projectId: string, status: PmacPro
     }
 
     const accessibleProject = await assertPmacProjectAccess(sanitizedProjectId, session.user)
+    if (accessibleProject.status === 'COMPLETED' && status !== 'COMPLETED') {
+      throw new Error('Completed projects are final and cannot be reopened.')
+    }
     if (status === 'COMPLETED') {
       const directorChecked = await hasPmacDirectorClosureCheck(sanitizedProjectId)
       assertPmacProjectCloseAccess(accessibleProject, session.user, directorChecked)
+      const closureProblem = getProjectClosureProblem(accessibleProject)
+      if (closureProblem) throw new Error(closureProblem)
     }
 
     await prisma.$transaction(async (tx) => {
@@ -497,21 +511,8 @@ export async function checkPmacProjectForClosure(projectId: string) {
         throw new Error('Completed projects are already closed.')
       }
 
-      const existingCheck = await tx.pmacActivityLog.findFirst({
-        where: {
-          projectId: sanitizedProjectId,
-          action: 'PROJECT_DIRECTOR_CHECKED',
-          actorRole: 'PMAC_DIRECTOR',
-        },
-        select: {
-          id: true,
-        },
-      })
-
-      if (existingCheck) {
-        return
-      }
-
+      // A prior check may have been invalidated by subsequent project changes.
+      // Keep each review as a new audit entry instead of silently ignoring it.
       await recordPmacActivity(tx, {
         entityType: 'PROJECT',
         entityId: sanitizedProjectId,
@@ -546,6 +547,9 @@ export async function submitPmacProjectOutput(payload: PmacProjectOutputPayload)
     const accessibleProject = await assertPmacProjectAccess(projectId, session.user)
     const directorChecked = await hasPmacDirectorClosureCheck(projectId)
     assertPmacProjectCloseAccess(accessibleProject, session.user, directorChecked)
+    if (accessibleProject.milestones.some(milestone => milestone.status !== 'DONE')) {
+      throw new Error('Complete every project milestone before closing the project.')
+    }
 
     await prisma.$transaction(async (tx) => {
       const project = await tx.pmacProject.findUnique({
@@ -575,8 +579,8 @@ export async function submitPmacProjectOutput(payload: PmacProjectOutputPayload)
         entityId: projectId,
         projectId,
         ...getActivityActor(session.user),
-        action: 'PROJECT_OUTPUT_SUBMITTED',
-        summary: `Submitted output and marked project "${project.title}" completed.`,
+        action: 'PROJECT_CLOSED',
+        summary: `Submitted final output and closed project "${project.title}".`,
         details: outputSummary,
       })
     })
@@ -766,11 +770,11 @@ export async function savePmacProjectMilestone(payload: PmacProjectMilestonePayl
       fieldName: 'Milestone ID',
       maxLength: 191,
     })
-    const title = sanitizeSingleLineText(payload.title, {
+    const title = validatePmacProjectMilestoneTitle(sanitizeSingleLineText(payload.title, {
       fieldName: 'Milestone title',
       maxLength: 191,
       required: true,
-    })
+    }))
     const notes = sanitizeMultilineText(payload.notes, {
       fieldName: 'Milestone notes',
       maxLength: 3000,

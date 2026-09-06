@@ -2,6 +2,7 @@ import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 
 import { getHomePathForRole, isCoreWorkflowRole, isPmacSystemRole } from "@/lib/roles";
+import { canCoordinatorAccessPmacPath } from "@/lib/pmacRouteAccess";
 
 export default withAuth(
   async function middleware(req) {
@@ -9,6 +10,13 @@ export default withAuth(
     const path = req.nextUrl.pathname;
     const role = typeof token?.role === "string" ? token.role : null;
     const homePath = getHomePathForRole(role);
+
+    // Preserve old links without allowing public storage to bypass record access.
+    if (path.startsWith('/uploads/pmac/')) {
+      const download = new URL('/api/pmac/attachments/download', req.url);
+      download.searchParams.set('legacyPath', path);
+      return NextResponse.rewrite(download);
+    }
 
     // Redirect to home if already logged in and trying to access signin
     if (path.startsWith("/auth/signin") && token) {
@@ -40,7 +48,10 @@ export default withAuth(
       return NextResponse.redirect(new URL(homePath, req.url));
     }
 
-    if (path.startsWith("/pmac/projects") && role === "CMAC_COORDINATOR") {
+    if (
+      role === "CMAC_COORDINATOR"
+      && canCoordinatorAccessPmacPath(path)
+    ) {
       return NextResponse.next();
     }
 

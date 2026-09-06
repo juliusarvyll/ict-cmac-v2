@@ -1,5 +1,7 @@
 'use client'
 
+import { runReverifiedAction } from '@/lib/reverificationClient'
+
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
@@ -11,7 +13,6 @@ import {
   ClipboardCheck,
   Clock3,
   FileText,
-  History,
   MapPin,
   Paperclip,
   Plus,
@@ -25,6 +26,7 @@ import {
 import clsx from 'clsx'
 
 import {
+  acknowledgePmacHandoff,
   approvePmacEvent,
   getPmacEventWorkspace,
   markPmacEventCompleted,
@@ -56,7 +58,6 @@ import type { PmacEventSourceType, PmacExecutiveTitle, PmacSpecialty } from '@/t
 
 import {
   buildAttendanceRows,
-  buildTemplateRows,
   EMPTY_ASSIGNMENT,
   EMPTY_WRAP_UP,
   formatDateTime,
@@ -229,9 +230,11 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
 
   const { event, permissions, viewerRole } = workspace
   const isImportedCmacEvent = event.sourceType === 'CMAC_REQUEST'
-  const canManageAttachments = permissions.canEdit || permissions.canManageAssignments || permissions.canApprove || permissions.canRecordAttendance
+  const canViewSourceLetter = ['CMAC_COORDINATOR', 'PMAC_DIRECTOR', 'PMAC_ASSISTANT_DIRECTOR', 'PMAC_SECRETARY'].includes(workspace.viewerRole)
+  const canManageAttachments = permissions.canEditWrapUp || permissions.canEdit || permissions.canManageAssignments || permissions.canApprove || permissions.canRecordAttendance
   const attendanceSummary = {
     total: attendanceRows.length,
+    unmarked: attendanceRows.filter(row => row.status === null).length,
     present: attendanceRows.filter(row => row.status === 'PRESENT').length,
     late: attendanceRows.filter(row => row.status === 'LATE').length,
     absent: attendanceRows.filter(row => row.status === 'ABSENT').length,
@@ -388,13 +391,39 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
                 {event.description || 'No description yet.'}
               </p>
               {event.sourceType === 'CMAC_REQUEST' ? (
-                <div className="mt-4 grid gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500 sm:grid-cols-3">
-                  <p><span className="font-bold text-slate-600">School:</span> {event.sourceSchool || 'Not recorded'}</p>
-                  <p><span className="font-bold text-slate-600">Need:</span> {event.sourceDocumentationType || 'Not recorded'}</p>
-                  <p>
-                    <span className="font-bold text-slate-600">Location:</span>{' '}
-                    {event.sourceCampusType === 'OFF_CAMPUS' ? 'Off-Campus' : event.sourceCampusType === 'IN_CAMPUS' ? 'In-Campus' : 'Not recorded'}
-                  </p>
+                <div className="mt-4 space-y-3 border-t border-slate-200 pt-3 text-xs text-slate-500">
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <p><span className="font-bold text-slate-600">School:</span> {event.sourceSchool || 'Not recorded'}</p>
+                    <p><span className="font-bold text-slate-600">Need:</span> {event.sourceDocumentationType || 'Not recorded'}</p>
+                    <p>
+                      <span className="font-bold text-slate-600">Location:</span>{' '}
+                      {event.sourceCampusType === 'OFF_CAMPUS' ? 'Off-Campus' : event.sourceCampusType === 'IN_CAMPUS' ? 'In-Campus' : 'Not recorded'}
+                    </p>
+                  </div>
+                  {event.sourceRequest?.eventDetails ? (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-sky-700">Coverage Instructions</p>
+                      <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">{event.sourceRequest.eventDetails}</p>
+                    </div>
+                  ) : null}
+                  {(event.sourceNeedsSameDayEdit || event.sourceNeedsSameDayPhoto) ? (
+                    <div className="flex flex-wrap gap-2">
+                      {event.sourceNeedsSameDayEdit ? <span className="status-badge border-amber-200 bg-amber-50 text-amber-700">Same-day video edit</span> : null}
+                      {event.sourceNeedsSameDayPhoto ? <span className="status-badge border-amber-200 bg-amber-50 text-amber-700">Same-day photo delivery</span> : null}
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    {workspace.viewerRole === 'CMAC_COORDINATOR' && event.sourceRequestId ? (
+                      <Link href={`/requests?requestId=${encodeURIComponent(event.sourceRequestId)}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 font-bold text-slate-700 hover:bg-slate-50">
+                        <FileText size={14} /> Open CMAC Request
+                      </Link>
+                    ) : null}
+                    {canViewSourceLetter && event.sourceRequest?.letterUrl?.startsWith('/api/request-letters/') ? (
+                      <a href={event.sourceRequest.letterUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 font-bold text-slate-700 hover:bg-slate-50">
+                        <FileText size={14} /> View Approved Letter
+                      </a>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -440,7 +469,7 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
         <div className="space-y-6">
-          {(permissions.canSubmit || permissions.canComplete || permissions.canManageAssignments) ? (
+          {(permissions.canSubmit || permissions.canComplete || permissions.canManageAssignments || permissions.canAcknowledgeHandoff) ? (
             <div className="card space-y-4 p-5">
               <SectionHeader
                 icon={<ClipboardCheck size={17} />}
@@ -449,6 +478,27 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
               />
 
               <div className="flex flex-wrap gap-3">
+                {permissions.canAcknowledgeHandoff ? (
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => {
+                      startTransition(async () => {
+                        const result = await acknowledgePmacHandoff(event.id)
+                        if (!result.success) {
+                          showToast('error', result.error || 'Failed to acknowledge CMAC handoff.')
+                          return
+                        }
+                        showToast('success', 'CMAC handoff acknowledged. Staffing can now proceed.')
+                        await refreshWorkspace()
+                      })
+                    }}
+                    className="rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-800 disabled:opacity-60"
+                  >
+                    {isPending ? 'Acknowledging...' : 'Acknowledge CMAC Handoff'}
+                  </button>
+                ) : null}
+
                 {permissions.canSubmit ? (
                   <button
                     type="button"
@@ -510,27 +560,6 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
                       <p className="font-semibold">Coverage gaps detected</p>
                       <p className="mt-1 text-amber-800">Recommended roles still missing for this event: {workspace.staffingReadiness.missingRoles.join(', ')}.</p>
                     </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {workspace.assignmentTemplates.length ? (
-                <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-                  <div className="space-y-1">
-                    <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Assignment Templates</p>
-                    <p className="text-sm text-slate-500">Start with a role layout based on coverage needs, then assign members to each slot.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {workspace.assignmentTemplates.map((template) => (
-                      <button
-                        key={template.id}
-                        type="button"
-                        onClick={() => setAssignmentRows(buildTemplateRows(template.roles))}
-                        className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
-                      >
-                        {template.label}
-                      </button>
-                    ))}
                   </div>
                 </div>
               ) : null}
@@ -599,7 +628,7 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{suggestion.workloadTier} load</span>
-                                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">{suggestion.attendanceRate}% attendance</span>
+                                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">{suggestion.attendanceRate === null ? 'No attendance data' : `${suggestion.attendanceRate}% attendance`}</span>
                                   {suggestion.matchedRoles.length ? (
                                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
                                       {PMAC_EVENT_DUTY_ROLE_LABELS[suggestion.matchedRoles[0] as AssignmentRow['assignmentRole']]}
@@ -812,338 +841,6 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
               </div>
             </div>
           ) : null}
-        </div>
-
-        <div className="space-y-6 lg:sticky lg:top-6">
-          {(permissions.canApprove || permissions.canReject) ? (
-            <div className="card space-y-4 p-5">
-              <SectionHeader
-                icon={<CheckCircle2 size={17} />}
-                title="CMAC Approval"
-                description="Approve or return the event after review."
-              />
-
-              <textarea
-                value={approvalRemarks}
-                onChange={event => setApprovalRemarks(event.target.value)}
-                rows={5}
-                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                placeholder="Add remarks for the PMAC team..."
-              />
-
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  disabled={isPending}
-                  onClick={() => {
-                    startTransition(async () => {
-                      const result = await approvePmacEvent(event.id, approvalRemarks)
-                      if (!result.success) {
-                        showToast('error', result.error || 'Failed to approve PMAC event.')
-                        return
-                      }
-                      showToast('success', 'PMAC event approved.')
-                      await refreshWorkspace()
-                    })
-                  }}
-                  className="rounded-xl bg-[#064e3b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#065f46] disabled:opacity-60"
-                >
-                  {isPending ? 'Saving...' : 'Approve Event'}
-                </button>
-                <button
-                  type="button"
-                  disabled={isPending}
-                  onClick={() => {
-                    startTransition(async () => {
-                      const result = await rejectPmacEvent(event.id, approvalRemarks)
-                      if (!result.success) {
-                        showToast('error', result.error || 'Failed to reject PMAC event.')
-                        return
-                      }
-                      showToast('success', 'PMAC event rejected.')
-                      await refreshWorkspace()
-                    })
-                  }}
-                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60"
-                >
-                  {isPending ? 'Saving...' : 'Reject Event'}
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {(viewerRole === 'PMAC_EXECUTIVE' || viewerRole === 'PMAC_MEMBER') && event.assignments.length ? (
-            <div className="card space-y-4 p-5">
-              <SectionHeader
-                icon={<UserRoundCheck size={17} />}
-                title="My Coverage Response"
-                description="Confirm whether you can cover your assigned duty."
-              />
-              {event.assignments.map((assignment) => (
-                <div key={assignment.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="status-badge bg-sky-50 text-sky-700 border-sky-200">
-                      {PMAC_EVENT_DUTY_ROLE_LABELS[assignment.assignmentRole as keyof typeof PMAC_EVENT_DUTY_ROLE_LABELS]}
-                    </span>
-                    <PmacAvailabilityBadge status={assignment.availabilityResponse} />
-                  </div>
-                  {assignment.assignmentNotes ? (
-                    <p className="mt-3 text-sm text-slate-500">{assignment.assignmentNotes}</p>
-                  ) : null}
-                  <div className="mt-4 flex gap-3">
-                    <button
-                      type="button"
-                      disabled={isPending}
-                      onClick={() => {
-                        startTransition(async () => {
-                          const result = await respondToPmacAssignment(assignment.id, 'YES')
-                          if (!result.success) {
-                            showToast('error', result.error || 'Failed to update response.')
-                            return
-                          }
-                          showToast('success', 'Availability marked Yes.')
-                          await refreshWorkspace()
-                        })
-                      }}
-                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isPending}
-                      onClick={() => {
-                        startTransition(async () => {
-                          const result = await respondToPmacAssignment(assignment.id, 'NO')
-                          if (!result.success) {
-                            showToast('error', result.error || 'Failed to update response.')
-                            return
-                          }
-                          showToast('success', 'Availability marked No.')
-                          await refreshWorkspace()
-                        })
-                      }}
-                      className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60"
-                    >
-                      No
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {(permissions.canRecordAttendance || event.attendance.length > 0) ? (
-            <div className="card space-y-4 p-5">
-              <SectionHeader
-                icon={<ClipboardCheck size={17} />}
-                title="Attendance"
-                description="Record attendance after PMAC duty assignment."
-              />
-
-              {permissions.canRecordAttendance ? (
-                <div className="space-y-3">
-                  {attendanceRows.length ? (
-                    <>
-                      <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-100 bg-slate-50/80 p-3 text-sm">
-                        <div className="col-span-2 rounded-xl bg-white px-3 py-2">
-                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Assigned</p>
-                          <p className="mt-1 font-bold text-slate-800">{attendanceSummary.total}</p>
-                        </div>
-                        <div className="rounded-xl bg-emerald-50 px-3 py-2">
-                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-emerald-700">Present</p>
-                          <p className="mt-1 font-bold text-emerald-800">{attendanceSummary.present}</p>
-                        </div>
-                        <div className="rounded-xl bg-sky-50 px-3 py-2">
-                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-sky-700">Late</p>
-                          <p className="mt-1 font-bold text-sky-800">{attendanceSummary.late}</p>
-                        </div>
-                        <div className="rounded-xl bg-red-50 px-3 py-2">
-                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-red-700">Absent</p>
-                          <p className="mt-1 font-bold text-red-800">{attendanceSummary.absent}</p>
-                        </div>
-                        <div className="rounded-xl bg-amber-50 px-3 py-2">
-                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-700">Excused</p>
-                          <p className="mt-1 font-bold text-amber-800">{attendanceSummary.excused}</p>
-                        </div>
-                      </div>
-
-                      <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
-                        {attendanceRows.map((row, index) => (
-                          <div key={row.memberId} className="grid gap-2 rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
-                            <div className="rounded-xl border border-slate-100 bg-white px-3 py-2.5">
-                              <p className="truncate text-sm font-semibold text-slate-800">{row.fullName}</p>
-                              <p className="mt-0.5 text-xs text-slate-400">PMAC assignment member</p>
-                            </div>
-                            <select
-                              value={row.status}
-                              onChange={event => setAttendanceRows(previous => previous.map((item, itemIndex) => (
-                                itemIndex === index
-                                  ? { ...item, status: event.target.value as AttendanceRow['status'] }
-                                  : item
-                              )))}
-                              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                            >
-                              {PMAC_ATTENDANCE_STATUSES.map(status => (
-                                <option key={status} value={status}>
-                                  {PMAC_ATTENDANCE_LABELS[status]}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              type="text"
-                              value={row.notes}
-                              onChange={event => setAttendanceRows(previous => previous.map((item, itemIndex) => (
-                                itemIndex === index
-                                  ? { ...item, notes: event.target.value }
-                                  : item
-                              )))}
-                              placeholder="Attendance notes"
-                              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-8 text-center text-sm text-slate-500">
-                      <p className="font-semibold text-slate-700">No assigned members yet</p>
-                      <p className="mt-1">Assign PMAC members before recording attendance.</p>
-                    </div>
-                  )}
-
-                  {attendanceRows.length ? (
-                    <div className="flex">
-                      <button
-                        type="button"
-                        disabled={isPending}
-                        onClick={() => {
-                          startTransition(async () => {
-                            const result = await savePmacAttendance(attendanceRows.map(row => ({
-                              eventId: event.id,
-                              memberId: row.memberId,
-                              status: row.status,
-                              notes: row.notes,
-                            })))
-                            if (!result.success) {
-                              showToast('error', result.error || 'Failed to save attendance.')
-                              return
-                            }
-                            showToast('success', 'Attendance saved.')
-                            await refreshWorkspace()
-                          })
-                        }}
-                        className="w-full rounded-xl bg-[#064e3b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#065f46] disabled:opacity-60"
-                      >
-                        {isPending ? 'Saving...' : 'Save Attendance'}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : event.attendance.length ? (
-                <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
-                  {event.attendance.map((record) => (
-                    <div key={record.id} className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-slate-800">{record.member.fullName}</p>
-                        <PmacAttendanceBadge status={record.status} />
-                      </div>
-                      <p className="mt-2 text-xs text-slate-400">Recorded by {record.recordedBy.name || 'Unknown'} on {formatDateTime(record.recordedAt)}</p>
-                      {record.notes ? <p className="mt-3 text-sm text-slate-500">{record.notes}</p> : null}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-8 text-center text-sm text-slate-500">
-                  <p className="font-semibold text-slate-700">No attendance recorded</p>
-                  <p className="mt-1">Attendance records will appear here after they are saved.</p>
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {(permissions.canManageAssignments || permissions.canRecordAttendance || permissions.canApprove || event.wrapUpUpdatedAt) ? (
-            <div className="card space-y-4 p-5">
-              <SectionHeader
-                icon={<FileText size={17} />}
-                title="Post-Event Wrap-Up"
-                description="Capture delivered outputs, issues, and follow-up notes."
-              />
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Delivered Outputs</label>
-                  <textarea
-                    value={wrapUpFields.deliveredOutputs}
-                    onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, deliveredOutputs: currentEvent.target.value }))}
-                    rows={4}
-                    disabled={!(permissions.canManageAssignments || permissions.canRecordAttendance)}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
-                    placeholder="Summarize coverage delivered, posts created, albums submitted, and final outputs."
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Issues Encountered</label>
-                  <textarea
-                    value={wrapUpFields.issuesEncountered}
-                    onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, issuesEncountered: currentEvent.target.value }))}
-                    rows={4}
-                    disabled={!(permissions.canManageAssignments || permissions.canRecordAttendance)}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
-                    placeholder="Record delays, staffing issues, venue constraints, or production blockers."
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Attachment Completeness</label>
-                  <textarea
-                    value={wrapUpFields.attachmentAuditNotes}
-                    onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, attachmentAuditNotes: currentEvent.target.value }))}
-                    rows={4}
-                    disabled={!(permissions.canManageAssignments || permissions.canRecordAttendance)}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
-                    placeholder="Note missing files, uploaded references, and anything still needed before closeout."
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Leadership Notes</label>
-                  <textarea
-                    value={wrapUpFields.wrapUpNotes}
-                    onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, wrapUpNotes: currentEvent.target.value }))}
-                    rows={4}
-                    disabled={!(permissions.canManageAssignments || permissions.canRecordAttendance)}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
-                    placeholder="Add recommendations, follow-up actions, or coaching notes for future events."
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-slate-400">
-                  {event.wrapUpUpdatedAt ? `Last updated ${formatDateTime(event.wrapUpUpdatedAt)}` : 'No wrap-up saved yet.'}
-                </p>
-                {(permissions.canManageAssignments || permissions.canRecordAttendance) ? (
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={() => {
-                      startTransition(async () => {
-                        const result = await savePmacEventWrapUp(event.id, wrapUpFields)
-                        if (!result.success) {
-                          showToast('error', result.error || 'Failed to save wrap-up.')
-                          return
-                        }
-                        showToast('success', 'Post-event wrap-up saved.')
-                        await refreshWorkspace()
-                      })
-                    }}
-                    className="rounded-xl bg-[#064e3b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#065f46] disabled:opacity-60"
-                  >
-                    {isPending ? 'Saving...' : 'Save Wrap-Up'}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
 
           <div className="card space-y-4 p-5">
             <SectionHeader
@@ -1186,7 +883,7 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
                   <div key={attachment.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <a href={attachment.filePath} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+                        <a href={`/api/pmac/attachments/download?id=${encodeURIComponent(attachment.id)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800">
                           <Paperclip size={14} />
                           {attachment.fileName}
                         </a>
@@ -1217,37 +914,363 @@ export default function PmacEventWorkspaceClient({ eventId }: { eventId: string 
               </div>
             )}
           </div>
+        </div>
 
-          <div className="card space-y-4 p-5">
-            <SectionHeader
-              icon={<History size={17} />}
-              title="Activity History"
-              description="Recent workflow updates and records for this event."
-            />
+        <div className="space-y-6 lg:sticky lg:top-6">
+          {(permissions.canApprove || permissions.canReject) ? (
+            <div className="card space-y-4 p-5">
+              <SectionHeader
+                icon={<CheckCircle2 size={17} />}
+                title="CMAC Approval"
+                description="Approve or return the event after review."
+              />
 
-            {event.activityLogs.length ? (
-              <div className="space-y-3">
-                {event.activityLogs.map((entry) => (
-                  <div key={entry.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">{entry.summary}</p>
-                        <p className="mt-1 text-xs text-slate-400">
-                          {entry.actorName} | {entry.actorRole.replaceAll('_', ' ')} | {formatDateTime(entry.createdAt)}
-                        </p>
-                      </div>
-                      <span className="status-badge bg-slate-100 text-slate-700 border-slate-200">{entry.action.replaceAll('_', ' ')}</span>
-                    </div>
-                    {entry.details ? <p className="mt-3 text-sm text-slate-500">{entry.details}</p> : null}
+              <textarea
+                value={approvalRemarks}
+                onChange={event => setApprovalRemarks(event.target.value)}
+                rows={5}
+                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                placeholder="Add remarks for the PMAC team..."
+              />
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => {
+                    startTransition(async () => {
+const result = await runReverifiedAction(() => approvePmacEvent(event.id, approvalRemarks))
+                      if (!result.success) {
+                        showToast('error', result.error || 'Failed to approve PMAC event.')
+                        return
+                      }
+                      showToast('success', 'PMAC event approved.')
+                      await refreshWorkspace()
+                    })
+                  }}
+                  className="rounded-xl bg-[#064e3b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#065f46] disabled:opacity-60"
+                >
+                  {isPending ? 'Saving...' : 'Approve Event'}
+                </button>
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => {
+                    startTransition(async () => {
+const result = await runReverifiedAction(() => rejectPmacEvent(event.id, approvalRemarks))
+                      if (!result.success) {
+                        showToast('error', result.error || 'Failed to reject PMAC event.')
+                        return
+                      }
+                      showToast('success', 'PMAC event rejected.')
+                      await refreshWorkspace()
+                    })
+                  }}
+                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                >
+                  {isPending ? 'Saving...' : 'Reject Event'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {(viewerRole === 'PMAC_EXECUTIVE' || viewerRole === 'PMAC_MEMBER') && event.assignments.length ? (
+            <div className="card space-y-4 p-5">
+              <SectionHeader
+                icon={<UserRoundCheck size={17} />}
+                title="My Coverage Response"
+                description="Confirm whether you can cover your assigned duty."
+              />
+              {event.assignments.map((assignment) => (
+                <div key={assignment.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="status-badge bg-sky-50 text-sky-700 border-sky-200">
+                      {PMAC_EVENT_DUTY_ROLE_LABELS[assignment.assignmentRole as keyof typeof PMAC_EVENT_DUTY_ROLE_LABELS]}
+                    </span>
+                    <PmacAvailabilityBadge status={assignment.availabilityResponse} />
                   </div>
-                ))}
+                  {assignment.assignmentNotes ? (
+                    <p className="mt-3 text-sm text-slate-500">{assignment.assignmentNotes}</p>
+                  ) : null}
+                  {permissions.canRespond && assignment.availabilityResponse === 'PENDING' ? (
+                  <div className="mt-4 flex gap-3">
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={() => {
+                        startTransition(async () => {
+                          const result = await respondToPmacAssignment(assignment.id, 'YES')
+                          if (!result.success) {
+                            showToast('error', result.error || 'Failed to update response.')
+                            return
+                          }
+                          showToast('success', 'Availability marked Yes.')
+                          await refreshWorkspace()
+                        })
+                      }}
+                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={() => {
+                        startTransition(async () => {
+                          const result = await respondToPmacAssignment(assignment.id, 'NO')
+                          if (!result.success) {
+                            showToast('error', result.error || 'Failed to update response.')
+                            return
+                          }
+                          showToast('success', 'Availability marked No.')
+                          await refreshWorkspace()
+                        })
+                      }}
+                      className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                    >
+                      No
+                    </button>
+                  </div>
+                  ) : (
+                    <p className="mt-4 text-xs font-semibold text-slate-500">
+                      Response submitted. It can no longer be changed.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {(permissions.canRecordAttendance || event.attendance.length > 0) ? (
+            <div className="card space-y-4 p-5">
+              <SectionHeader
+                icon={<ClipboardCheck size={17} />}
+                title="Attendance"
+                description="Record attendance after the event begins for members who confirmed coverage."
+              />
+
+              {permissions.canRecordAttendance ? (
+                <div className="space-y-3">
+                  {attendanceRows.length ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-100 bg-slate-50/80 p-3 text-sm">
+                        <div className="col-span-2 rounded-xl bg-white px-3 py-2">
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Confirmed</p>
+                          <p className="mt-1 font-bold text-slate-800">{attendanceSummary.total}</p>
+                        </div>
+                        <div className="rounded-xl bg-emerald-50 px-3 py-2">
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-emerald-700">Present</p>
+                          <p className="mt-1 font-bold text-emerald-800">{attendanceSummary.present}</p>
+                        </div>
+                        <div className="rounded-xl bg-sky-50 px-3 py-2">
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-sky-700">Late</p>
+                          <p className="mt-1 font-bold text-sky-800">{attendanceSummary.late}</p>
+                        </div>
+                        <div className="rounded-xl bg-red-50 px-3 py-2">
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-red-700">Absent</p>
+                          <p className="mt-1 font-bold text-red-800">{attendanceSummary.absent}</p>
+                        </div>
+                        <div className="rounded-xl bg-amber-50 px-3 py-2">
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-700">Excused</p>
+                          <p className="mt-1 font-bold text-amber-800">{attendanceSummary.excused}</p>
+                        </div>
+                      </div>
+
+                      <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+                        {attendanceRows.map((row, index) => (
+                          <div key={row.memberId} className="grid gap-2 rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
+                            <div className="rounded-xl border border-slate-100 bg-white px-3 py-2.5">
+                              <p className="truncate text-sm font-semibold text-slate-800">{row.fullName}</p>
+                              <p className="mt-0.5 text-xs text-slate-400">Confirmed coverage member</p>
+                            </div>
+                            <select
+                              value={row.status ?? ''}
+                              onChange={event => setAttendanceRows(previous => previous.map((item, itemIndex) => (
+                                itemIndex === index
+                                  ? { ...item, status: event.target.value as AttendanceRow['status'] }
+                                  : item
+                              )))}
+                              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                            >
+                              <option value="" disabled>Select status</option>
+                              {PMAC_ATTENDANCE_STATUSES.map(status => (
+                                <option key={status} value={status}>
+                                  {PMAC_ATTENDANCE_LABELS[status]}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              value={row.notes}
+                              onChange={event => setAttendanceRows(previous => previous.map((item, itemIndex) => (
+                                itemIndex === index
+                                  ? { ...item, notes: event.target.value }
+                                  : item
+                              )))}
+                              placeholder="Attendance notes"
+                              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-8 text-center text-sm text-slate-500">
+                      <p className="font-semibold text-slate-700">No confirmed members yet</p>
+                      <p className="mt-1">Members must answer Yes to their coverage assignment before attendance can be recorded.</p>
+                    </div>
+                  )}
+
+                  {attendanceRows.length ? (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        disabled={isPending || attendanceSummary.unmarked > 0}
+                        onClick={() => {
+                          if (attendanceSummary.unmarked > 0) {
+                            showToast('error', `Select a status for ${attendanceSummary.unmarked} confirmed member(s) before saving.`)
+                            return
+                          }
+                          startTransition(async () => {
+                            const result = await savePmacAttendance(attendanceRows.map(row => ({
+                              eventId: event.id,
+                              memberId: row.memberId,
+                              status: row.status!,
+                              notes: row.notes,
+                            })))
+                            if (!result.success) {
+                              showToast('error', result.error || 'Failed to save attendance.')
+                              return
+                            }
+                            showToast('success', 'Attendance saved.')
+                            await refreshWorkspace()
+                          })
+                        }}
+                        className="w-full rounded-xl bg-[#064e3b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#065f46] disabled:opacity-60"
+                      >
+                        {isPending ? 'Saving...' : 'Save Attendance'}
+                      </button>
+                      {attendanceSummary.unmarked > 0 ? (
+                        <p className="mt-2 text-center text-xs font-medium text-amber-700">
+                          {attendanceSummary.unmarked} member(s) still need an attendance status.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : event.attendance.length ? (
+                <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+                  {event.attendance.map((record) => (
+                    <div key={record.id} className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-800">{record.member.fullName}</p>
+                        <PmacAttendanceBadge status={record.status} />
+                      </div>
+                      <p className="mt-2 text-xs text-slate-400">Recorded by {record.recordedBy.name || 'Unknown'} on {formatDateTime(record.recordedAt)}</p>
+                      {record.notes ? <p className="mt-3 text-sm text-slate-500">{record.notes}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-8 text-center text-sm text-slate-500">
+                  <p className="font-semibold text-slate-700">No attendance recorded</p>
+                  <p className="mt-1">Attendance records will appear here after they are saved.</p>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {(permissions.canEditWrapUp || permissions.canApprove || event.wrapUpUpdatedAt) ? (
+            <div className="card space-y-4 p-5">
+              <SectionHeader
+                icon={<FileText size={17} />}
+                title="Post-Event Wrap-Up"
+                description="Capture delivered outputs, issues, and follow-up notes."
+              />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Delivered Outputs</label>
+                  <textarea
+                    value={wrapUpFields.deliveredOutputs}
+                    onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, deliveredOutputs: currentEvent.target.value }))}
+                    rows={4}
+                    disabled={!(permissions.canEditWrapUp)}
+                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
+                    placeholder="Summarize the delivered outputs and include an https:// link to the final album, folder, or files."
+                  />
+                  <p className="text-xs text-slate-500">Notes can be saved now. A completed event needs a shareable output link here before CMAC shows it as Delivered. Check that the requester can open the link.</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Issues Encountered</label>
+                  <textarea
+                    value={wrapUpFields.issuesEncountered}
+                    onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, issuesEncountered: currentEvent.target.value }))}
+                    rows={4}
+                    disabled={!(permissions.canEditWrapUp)}
+                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
+                    placeholder="Record delays, staffing issues, venue constraints, or production blockers."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Attachment Completeness</label>
+                  <textarea
+                    value={wrapUpFields.attachmentAuditNotes}
+                    onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, attachmentAuditNotes: currentEvent.target.value }))}
+                    rows={4}
+                    disabled={!(permissions.canEditWrapUp)}
+                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
+                    placeholder="Note missing files, uploaded references, and anything still needed before closeout."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Leadership Notes</label>
+                  <textarea
+                    value={wrapUpFields.wrapUpNotes}
+                    onChange={currentEvent => setWrapUpFields((previous) => ({ ...previous, wrapUpNotes: currentEvent.target.value }))}
+                    rows={4}
+                    disabled={!(permissions.canEditWrapUp)}
+                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
+                    placeholder="Add recommendations, follow-up actions, or coaching notes for future events."
+                  />
+                </div>
               </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
-                No PMAC activity entries have been recorded for this event yet.
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-400">
+                  {event.wrapUpUpdatedAt ? `Last updated ${formatDateTime(event.wrapUpUpdatedAt)}` : 'No wrap-up saved yet.'}
+                </p>
+                {(permissions.canEditWrapUp) ? (
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => {
+                      startTransition(async () => {
+                        try {
+                          const result = await runWithReverification(
+                            () => savePmacEventWrapUp(event.id, wrapUpFields),
+                            response => response.success ? null : response.error
+                          )
+                          if (!result.success) {
+                            showToast('error', result.error || 'Failed to save wrap-up.')
+                            return
+                          }
+                          showToast('success', 'Post-event wrap-up saved.')
+                          await refreshWorkspace()
+                        } catch (error) {
+                          showToast('error', error instanceof Error ? error.message : 'Failed to save wrap-up.')
+                        }
+                      })
+                    }}
+                    className="rounded-xl bg-[#064e3b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#065f46] disabled:opacity-60"
+                  >
+                    {isPending ? 'Saving...' : 'Save Wrap-Up'}
+                  </button>
+                ) : null}
               </div>
-            )}
-          </div>
+            </div>
+          ) : null}
+
         </div>
       </div>
     </div>
