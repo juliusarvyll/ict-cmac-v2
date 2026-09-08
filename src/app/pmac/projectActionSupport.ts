@@ -4,15 +4,11 @@ import { isPmacProjectLauncherRole } from '@/lib/pmac'
 import { recordPmacActivity } from '@/lib/pmacActivity'
 import { getExecutiveBranchForUser } from '@/lib/pmacProjects'
 import { prisma } from '@/lib/prisma'
+import { hasDirectorClosureCheck } from '@/lib/pmacProjectClosure'
 import { sanitizeSingleLineText } from '@/lib/sanitization'
 import type { SessionUser, PmacProjectMilestoneStatusValue, PmacProjectStatusValue } from './actionShared'
 
-export const PMAC_PROJECT_CLOSURE_INVALIDATING_ACTIONS = [
-  'PROJECT_STATUS_UPDATED', 'PROJECT_HEAD_ASSIGNED', 'PROJECT_UPDATED',
-  'PROJECT_OUTPUT_SUBMITTED', 'PROJECT_LINK_ATTACHED', 'PROJECT_MEMBERS_ASSIGNED',
-  'PROJECT_MILESTONE_CREATED', 'PROJECT_MILESTONE_UPDATED', 'PROJECT_MILESTONE_STATUS_UPDATED',
-  'PROJECT_DEADLINE_RECONCILED',
-] as const
+export { PMAC_PROJECT_CLOSURE_INVALIDATING_ACTIONS } from '@/lib/pmacProjectClosure'
 
 export function parseProjectDate(value: string, fieldName: string) {
   const sanitized = sanitizeSingleLineText(value, {
@@ -181,13 +177,14 @@ export async function reconcilePmacProjectDeadlines(db: Prisma.TransactionClient
   for (const project of overdueProjects) {
     const nextStatus = 'ON_HOLD'
 
-    await db.pmacProject.update({
-      where: { id: project.id },
+    const updated = await db.pmacProject.updateMany({
+      where: { id: project.id, status: { in: ['ACTIVE', 'PLANNED'] }, targetDate: { lt: now } },
       data: {
         status: nextStatus,
         completedAt: null,
       },
     })
+    if (updated.count !== 1) continue
 
     await recordPmacActivity(db, {
       entityType: 'PROJECT',
@@ -270,31 +267,7 @@ export function isAssignedPmacProjectHead(project: { headMemberId: string | null
 }
 
 export async function hasPmacDirectorClosureCheck(projectId: string) {
-  const check = await prisma.pmacActivityLog.findFirst({
-    where: {
-      projectId,
-      action: 'PROJECT_DIRECTOR_CHECKED',
-      actorRole: 'PMAC_DIRECTOR',
-    },
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    select: {
-      id: true,
-      createdAt: true,
-    },
-  })
-
-  if (!check) return false
-
-  const changedAfterCheck = await prisma.pmacActivityLog.findFirst({
-    where: {
-      projectId,
-      action: { in: [...PMAC_PROJECT_CLOSURE_INVALIDATING_ACTIONS] },
-      createdAt: { gt: check.createdAt },
-    },
-    select: { id: true },
-  })
-
-  return !changedAfterCheck
+  return hasDirectorClosureCheck(prisma, projectId)
 }
 
 export function getProjectClosureProblem(project: {

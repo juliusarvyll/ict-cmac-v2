@@ -1,17 +1,17 @@
 services:
   db:
-    image: mysql:8.4
-    container_name: ict-cmac-db
+    image: postgres:17
+    container_name: ict-cmac-postgres
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: ict_cmac
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+      POSTGRES_DB: ict_cmac
     ports:
-      - "3306:3306"
+      - "127.0.0.1:5432:5432"
     volumes:
-      - ict-cmac-mysql-data:/var/lib/mysql
+      - ict-cmac-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-proot"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ict_cmac"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -43,15 +43,17 @@ services:
     volumes:
       - ict-cmac-pmac-uploads:/app/private/uploads/pmac
     environment:
-      DATABASE_URL: mysql://root:root@db:3306/ict_cmac
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-local-development-only}@db:5432/ict_cmac
+      DIRECT_URL: postgresql://postgres:${POSTGRES_PASSWORD:-local-development-only}@db:5432/ict_cmac
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
       CLAMAV_TIMEOUT_MS: 30000
       SERVER_ACTION_ALLOWED_ORIGINS: ${SERVER_ACTION_ALLOWED_ORIGINS:-}
-      PRISMA_SKIP_DB_PUSH: ${PRISMA_SKIP_DB_PUSH:-0}
+      PRISMA_RUN_MIGRATIONS: ${PRISMA_RUN_MIGRATIONS:-0}
       PRISMA_RUN_SEED: ${PRISMA_RUN_SEED:-0}
 
 volumes:
-  ict-cmac-mysql-data:
+  # A new volume; the old MySQL volume must be retained until migration is verified.
+  ict-cmac-postgres-data:
   ict-cmac-clamav-data:
   ict-cmac-pmac-uploads:

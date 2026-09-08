@@ -1,5 +1,7 @@
 'use server'
 
+import { completeApprovedPmacEvent } from '@/lib/pmacLifecycleWrites'
+
 import { unstable_noStore as noStore } from 'next/cache'
 import { calculatePmacReadinessScore, getRecommendedAssignmentRoles, getPmacReadinessLabel, isPmacAssignmentResponderRole, isPmacAttendanceManagerRole, isPmacStaffingManagerRole } from '@/lib/pmac'
 import { recordPmacActivity } from '@/lib/pmacActivity'
@@ -832,14 +834,7 @@ export async function markPmacEventCompleted(eventId: string) {
     if (completionBlocker) return { success: false, error: completionBlocker }
 
     await prisma.$transaction(async (tx) => {
-      const completed = await tx.pmacEvent.updateMany({
-        where: { id: sanitizedId, status: 'APPROVED' },
-        data: {
-          status: 'COMPLETED',
-          completedAt: new Date(),
-        },
-      })
-      if (completed.count !== 1) throw new Error('This event changed while it was being completed. Refresh and try again.')
+      await completeApprovedPmacEvent(tx, sanitizedId)
 
       await recordPmacActivity(tx, {
         entityType: 'EVENT',

@@ -18,9 +18,9 @@ if [ -z "${SERVER_ACTION_ALLOWED_ORIGINS:-}" ]; then
   export SERVER_ACTION_ALLOWED_ORIGINS="$NEXTAUTH_URL"
 fi
 
-if [ "${PRISMA_SKIP_DB_PUSH:-0}" != "1" ]; then
-  npx prisma db execute --file prisma/remove-pmac-tags.sql --schema prisma/schema.prisma
-  npx prisma db push
+if [ "${PRISMA_RUN_MIGRATIONS:-0}" = "1" ]; then
+  require_env DIRECT_URL
+  npx prisma migrate deploy
 fi
 
 if [ "${PRISMA_RUN_SEED:-0}" = "1" ]; then

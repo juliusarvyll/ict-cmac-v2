@@ -9,7 +9,7 @@ A Next.js App Router application for managing CMAC and PMAC documentation reques
 - Coordinator and director approval workflow
 - Shared event calendar with conflict detection
 - Dashboard and notifications for request activity
-- Prisma + MySQL persistence
+- Prisma ORM + PostgreSQL persistence (Prisma Postgres compatible)
 - NextAuth credential-based authentication
 
 ## Tech Stack
@@ -19,16 +19,16 @@ A Next.js App Router application for managing CMAC and PMAC documentation reques
 - TypeScript
 - Tailwind CSS
 - Prisma
-- MySQL
+- PostgreSQL
 - NextAuth
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22 (matches CI and Docker; Next.js requires at least 20.9)
 - npm
-- MySQL database
+- PostgreSQL database (hosted Prisma Postgres or local PostgreSQL)
 - ClamAV scanner for file uploads
 
 ### Install
@@ -42,7 +42,8 @@ npm install
 Create a `.env` file with at least:
 
 ```bash
-DATABASE_URL="mysql://root@127.0.0.1:3306/ict_cmac"
+DATABASE_URL="postgresql://postgres:local-development-only@127.0.0.1:5432/ict_cmac"
+DIRECT_URL="postgresql://postgres:local-development-only@127.0.0.1:5432/ict_cmac"
 NEXTAUTH_SECRET="replace-me"
 NEXTAUTH_URL="http://localhost:3000"
 SERVER_ACTION_ALLOWED_ORIGINS="localhost:3000,127.0.0.1:3000"
@@ -51,11 +52,11 @@ CLAMAV_PORT="3310"
 CLAMAV_TIMEOUT_MS="30000"
 ```
 
-If you are using XAMPP's default local MySQL, `root` usually has no password, which matches the example above.
+For Prisma Postgres, use its pooled URL as `DATABASE_URL` and its direct URL as `DIRECT_URL`, with TLS enabled. Copy values privately from the Prisma Console; do not commit credentials. Existing MySQL installations must follow the [data-preserving migration guide](docs/prisma-postgres-migration.md) before changing their application connection.
 
 ### Database
 
-If you do not already have MySQL and ClamAV running locally, start the bundled containers first:
+If you do not already have PostgreSQL and ClamAV running locally, start the bundled containers first:
 
 ```bash
 docker compose up -d db clamav
@@ -63,10 +64,10 @@ docker compose up -d db clamav
 
 ```bash
 npx prisma generate
-npx prisma db push
+npm run db:migrate
 ```
 
-Optional seed:
+Optional seed for a fresh development database only (do not seed a migrated database):
 
 ```bash
 npx prisma db seed
@@ -106,7 +107,8 @@ docker compose up --build
 The container expects these environment variables:
 
 ```bash
-DATABASE_URL="mysql://root:root@127.0.0.1:3306/ict_cmac"
+DATABASE_URL="postgresql://postgres:local-development-only@db:5432/ict_cmac"
+DIRECT_URL="postgresql://postgres:local-development-only@db:5432/ict_cmac"
 NEXTAUTH_SECRET="replace-me"
 NEXTAUTH_URL="http://localhost:3000"
 SERVER_ACTION_ALLOWED_ORIGINS="localhost:3000,127.0.0.1:3000"
@@ -115,13 +117,13 @@ SERVER_ACTION_ALLOWED_ORIGINS="localhost:3000,127.0.0.1:3000"
 Optional container startup flags:
 
 ```bash
-PRISMA_SKIP_DB_PUSH=0
+PRISMA_RUN_MIGRATIONS=0
 PRISMA_RUN_SEED=0
 ```
 
-By default `docker compose` starts a local MySQL service named `db`, and the app container points Prisma at that service automatically.
+By default `docker compose` starts a local PostgreSQL service named `db`, and the app container points Prisma at that service automatically. Its new volume does not reuse or delete the old MySQL data volume. The example database password is for local development only; keep production databases private and use strong credentials.
 It also starts the official ClamAV service and waits for its virus definitions and daemon health check before starting the app. Uploads fail closed when ClamAV is missing, unavailable, times out, or returns an invalid response; rejected files are never persisted.
-The container also runs `prisma db push` before starting Next.js so the schema stays in sync with the configured database.
+Schema changes are opt-in: run `docker compose run --rm app npm run db:migrate` before first startup, or explicitly set `PRISMA_RUN_MIGRATIONS=1` for a controlled deployment. Startup no longer runs the old MySQL tag-deletion script or `db push`.
 The container keeps the same runtime contract as the non-Docker app: `DATABASE_URL`, `NEXTAUTH_SECRET`, and `NEXTAUTH_URL` must be provided. `docker compose` loads them from `.env`, and the entrypoint fails fast if any required value is missing.
 
 After deploying the CMAC-to-PMAC fulfillment workflow for the first time, reconcile existing approved PMAC requests once:
@@ -130,7 +132,7 @@ After deploying the CMAC-to-PMAC fulfillment workflow for the first time, reconc
 npm run backfill:pmac-handoffs
 ```
 
-Vercel uses the build command in `vercel.json` to apply additive Prisma schema updates before creating the Next.js build. Ensure `DATABASE_URL` is configured for every Vercel environment that can deploy this application.
+Vercel's build command only generates Prisma Client and builds Next.js. It deliberately does **not** push the schema or seed a database. Apply reviewed schema migrations separately after taking a backup. Configure PostgreSQL `DATABASE_URL` and `DIRECT_URL`; Preview must use a separate database and credentials from Production. A successful build alone does not verify database connectivity. See the [migration guide](docs/prisma-postgres-migration.md) and [deployment readiness](docs/deployment-readiness.md).
 
 ### Malware scanner deployment
 

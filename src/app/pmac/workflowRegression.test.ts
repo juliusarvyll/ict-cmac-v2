@@ -30,6 +30,7 @@ describe('workflow regressions', () => {
     mocks.assignment.mockResolvedValue({ id: 'a1', memberId: 'm1', availabilityResponse: 'PENDING', event: { id: 'e1', status: 'APPROVED' } })
     mocks.assignments.mockResolvedValue([])
     mocks.transaction.mockImplementation(async operation => operation({
+      $queryRaw: vi.fn().mockResolvedValue([]),
       pmacEvent: { updateMany: async () => ({ count: 1 }) },
       pmacEventAssignment: { updateMany: mocks.updateResponse, create: vi.fn() },
       pmacProject: { findUnique: async () => ({ title: 'Project', status: 'ACTIVE' }) },

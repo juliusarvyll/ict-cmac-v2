@@ -186,11 +186,11 @@ export async function getPmacMemberDirectory(input: PmacMemberDirectoryQuery = {
     ...(query
       ? {
           OR: [
-            { fullName: { contains: query } },
-            { email: { contains: query } },
-            { phone: { contains: query } },
-            { department: { contains: query } },
-            { course: { contains: query } },
+            { fullName: { contains: query, mode: 'insensitive' } },
+            { email: { contains: query, mode: 'insensitive' } },
+            { phone: { contains: query, mode: 'insensitive' } },
+            { department: { contains: query, mode: 'insensitive' } },
+            { course: { contains: query, mode: 'insensitive' } },
           ],
         }
       : {}),

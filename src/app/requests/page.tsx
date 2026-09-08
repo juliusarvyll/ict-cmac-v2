@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { getStatusLabel, getStatusColor } from '@/lib/data'
 import { Archive, CheckCircle, Download, Eye, Filter, FileCheck2, Printer, RotateCcw, X } from 'lucide-react'
 import clsx from 'clsx'
@@ -24,6 +25,7 @@ import {
 } from './requestPageSupport'
 
 export default function RequestsPage() {
+  const router = useRouter()
   const { data: session } = useSession()
   const [requests, setRequests] = useState<RequestItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -705,7 +707,7 @@ export default function RequestsPage() {
                   {session?.user.role === 'SECRETARY' && ['PENDING', 'REVISION_REQUESTED', 'WITHDRAWN', 'REJECTED'].includes(selected.status) && (
                     <div className="pt-6 border-t border-slate-100 space-y-3">
                       <button
-                        onClick={() => { window.location.href = `/new-request?edit=${encodeURIComponent(selected.id)}` }}
+                        onClick={() => router.push(`/new-request?edit=${encodeURIComponent(selected.id)}`)}
                         className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800"
                       >
                         Edit Request Details

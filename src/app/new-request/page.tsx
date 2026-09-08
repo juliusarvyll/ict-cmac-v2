@@ -4,6 +4,7 @@ import type { CampusType, School, ServiceType, DocumentationType } from '@/types
 import { CheckCircle2, Upload, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
 import { useSession } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 
 import { SCHOOL_LABELS, SCHOOLS } from '@/lib/schools'
 import { buildRequestQualityAssessment, getMinimumAdvanceRequestDate, getRequestBlockingError } from '@/lib/requestValidation'
@@ -92,6 +93,7 @@ const ADDITIONAL_REQUIREMENTS = [
 ] as const
 
 export default function NewRequestPage() {
+  const router = useRouter()
   const { data: session } = useSession()
   const minDateStr = getMinimumAdvanceRequestDate()
   const buildInitialForm = (): RequestForm => ({
@@ -377,7 +379,7 @@ ${isDirector ? 'Director' : 'Secretary'}, ${form.school || '[School/Department]'
       
       if (res.success) {
         if (editingId) {
-          window.location.href = `/requests?requestId=${encodeURIComponent(editingId)}`
+          router.push(`/requests?requestId=${encodeURIComponent(editingId)}`)
           return
         }
         setSubmitted(true)
