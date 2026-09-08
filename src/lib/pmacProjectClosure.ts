@@ -8,7 +8,7 @@ export const PMAC_PROJECT_CLOSURE_INVALIDATING_ACTIONS = [
 ] as const
 
 export async function lockEditablePmacProject(tx: Prisma.TransactionClient, projectId: string) {
-  await tx.$queryRaw`SELECT id FROM PmacProject WHERE id = ${projectId} FOR UPDATE`
+  await tx.$queryRaw`SELECT "id" FROM "PmacProject" WHERE "id" = ${projectId} FOR UPDATE`
   const project = await tx.pmacProject.findUnique({ where: { id: projectId }, select: { status: true } })
   if (!project) throw new Error('Project not found.')
   if (project.status === 'COMPLETED') throw new Error('Completed projects are final and cannot be edited.')
@@ -35,7 +35,7 @@ export async function closeAssignedPmacProject(
   actor: { role: string; pmacMemberId?: string | null },
   outputSummary?: string,
 ) {
-  await tx.$queryRaw`SELECT id FROM PmacProject WHERE id = ${projectId} FOR UPDATE`
+  await tx.$queryRaw`SELECT "id" FROM "PmacProject" WHERE "id" = ${projectId} FOR UPDATE`
   const project = await tx.pmacProject.findUnique({ where: { id: projectId }, include: { milestones: true } })
   if (!project) throw new Error('Project not found.')
   if (project.status === 'COMPLETED') throw new Error('Completed projects are already closed.')

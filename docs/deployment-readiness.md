@@ -1,5 +1,7 @@
 # Deployment readiness
 
+**Database direction updated:** the user selected Prisma Postgres and requested retention of existing MySQL records. See [the PostgreSQL migration and cutover guide](prisma-postgres-migration.md). The MySQL references below describe the earlier verification baseline, not the new deployment configuration.
+
 ## Checklist (7 September 2026)
 
 | Task | Current result | Remaining acceptance |

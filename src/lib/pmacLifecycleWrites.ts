@@ -17,7 +17,7 @@ export async function recordVoteWhileOpen(
   // Lock the parent until commit. Closing/archiving the same row must wait,
   // and a vote waiting behind closure observes the closed state.
   const polls = await tx.$queryRaw<Array<{ status: string; opensAt: Date | null; closesAt: Date | null }>>`
-    SELECT status, opensAt, closesAt FROM PmacPoll WHERE id = ${data.pollId} FOR UPDATE
+    SELECT "status", "opensAt", "closesAt" FROM "PmacPoll" WHERE "id" = ${data.pollId} FOR UPDATE
   `
   const poll = polls[0]
   const now = new Date()
@@ -28,7 +28,7 @@ export async function recordVoteWhileOpen(
 }
 
 export async function completeApprovedPmacEvent(tx: Prisma.TransactionClient, eventId: string) {
-  await tx.$queryRaw`SELECT id FROM PmacEvent WHERE id = ${eventId} FOR UPDATE`
+  await tx.$queryRaw`SELECT "id" FROM "PmacEvent" WHERE "id" = ${eventId} FOR UPDATE`
   const event = await tx.pmacEvent.findUnique({
     where: { id: eventId },
     include: { assignments: true, attendance: true },
